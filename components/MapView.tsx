@@ -218,13 +218,11 @@ const MapView: React.FC<MapViewProps> = ({
         wellMarkerMapRef.current.set(w.id, marker);
       });
 
-      if (wells.length > 0) {
-        const bounds = wellLayerRef.current.getBounds();
-        if (bounds.isValid()) mapRef.current.flyToBounds(bounds, { padding: [100, 100], duration: 1 });
-      } else {
-        const aBounds = L.latLngBounds([selectedAquifer.bounds[0], selectedAquifer.bounds[1]], [selectedAquifer.bounds[2], selectedAquifer.bounds[3]]);
-        mapRef.current.flyToBounds(aBounds, { padding: [40, 40] });
-      }
+      const aBounds = L.latLngBounds(
+        [selectedAquifer.bounds[0], selectedAquifer.bounds[1]],
+        [selectedAquifer.bounds[2], selectedAquifer.bounds[3]]
+      );
+      mapRef.current.flyToBounds(aBounds, { padding: [40, 40], duration: 1 });
     }
     visibleWellsRef.current = visible;
   }, [wells, selectedAquifer, wellMeasurementCounts, minObs]);

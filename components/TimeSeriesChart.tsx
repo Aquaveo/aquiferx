@@ -127,19 +127,21 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
     <div className="w-full h-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" />
           <XAxis
             dataKey="date"
             type="number"
             domain={['auto', 'auto']}
             tickFormatter={formatXAxis}
-            stroke="#94a3b8"
+            stroke="#475569"
             fontSize={11}
+            tick={{ fill: '#334155' }}
           />
           <YAxis
             domain={['auto', 'auto']}
-            stroke="#94a3b8"
+            stroke="#475569"
             fontSize={11}
+            tick={{ fill: '#334155' }}
             tickFormatter={(val) => val.toLocaleString()}
           />
           <Tooltip
@@ -190,7 +192,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
                     const { cx, cy, payload } = props;
                     if (payload[`dot_${wellId}`] === undefined) return <React.Fragment key={`empty-${wellId}-${payload.date}`} />;
                     return (
-                      <circle key={`${wellId}-${payload.date}`} cx={cx} cy={cy} r={4} fill={color} stroke="#fff" strokeWidth={2} />
+                      <circle key={`${wellId}-${payload.date}`} cx={cx} cy={cy} r={isMulti ? 3 : 4} fill={color} stroke={isMulti ? "transparent" : "#fff"} strokeWidth={isMulti ? 0 : 2} />
                     );
                   }}
                   name={`dot_${wellId}`}

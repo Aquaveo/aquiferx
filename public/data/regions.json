@@ -33,5 +33,10 @@
     "id": "volta-basin",
     "path": "/data/volta-basin",
     "name": "Volta Basin"
+  },
+  {
+    "id": "jamaica",
+    "path": "/data/jamaica",
+    "name": "Jamaica"
   }
 ]
