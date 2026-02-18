@@ -250,7 +250,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
   return (
     <div
       ref={wrapperRef}
-      className="w-full h-full relative"
+      className="w-full h-full relative outline-none"
       onClick={handleWrapperClick}
       onContextMenu={handleWrapperContextMenu}
       onMouseMove={handleWrapperMouseMove}

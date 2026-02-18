@@ -61,6 +61,14 @@ const DataManager: React.FC<DataManagerProps> = ({
 
   const [dateFormat, setDateFormat] = useState('iso');
 
+  // GSE interpolation state
+  const [gseValues, setGseValues] = useState<Map<string, number>>(new Map());
+  const [gseInterpolated, setGseInterpolated] = useState(false);
+  const [gseProgress, setGseProgress] = useState({ current: 0, total: 0 });
+  const [gseSource, setGseSource] = useState('');
+  const [gseError, setGseError] = useState('');
+  const [gseIsRunning, setGseIsRunning] = useState(false);
+
   // Check if there's only a single aquifer (aquifer_id is unnecessary)
   const singleAquifer = (() => {
     if (!aquiferFile) return false;
@@ -69,6 +77,24 @@ const DataManager: React.FC<DataManagerProps> = ({
       : [aquiferFile.data];
     return features.length === 1;
   })();
+  // Step routing: conditionally insert GSE step when wells lack GSE column
+  const needsGseInterpolation = wellsFile !== null && !wellsFile.mapping['gse'];
+  const totalSteps = needsGseInterpolation ? 7 : 6;
+
+  type StepKind = 'region' | 'boundary' | 'aquifers' | 'wells' | 'gse' | 'waterLevels' | 'save';
+
+  const getStepKind = (s: number): StepKind => {
+    if (s <= 4) return (['region', 'boundary', 'aquifers', 'wells'] as StepKind[])[s - 1];
+    if (needsGseInterpolation) {
+      if (s === 5) return 'gse';
+      if (s === 6) return 'waterLevels';
+      return 'save';
+    }
+    if (s === 5) return 'waterLevels';
+    return 'save';
+  };
+  const currentStepKind = getStepKind(step);
+
   const [showColumnMapper, setShowColumnMapper] = useState(false);
   const [currentMappingFile, setCurrentMappingFile] = useState<'region' | 'aquifer' | 'wells' | 'waterLevels' | null>(null);
 
@@ -320,6 +346,13 @@ const DataManager: React.FC<DataManagerProps> = ({
           break;
         case 'wells':
           setWellsFile(uploadedFile);
+          // Reset GSE interpolation state when wells are re-uploaded
+          setGseValues(new Map());
+          setGseInterpolated(false);
+          setGseProgress({ current: 0, total: 0 });
+          setGseSource('');
+          setGseError('');
+          setGseIsRunning(false);
           break;
         case 'waterLevels':
           setWaterLevelsFile(uploadedFile);
@@ -446,6 +479,135 @@ const DataManager: React.FC<DataManagerProps> = ({
       case 'waterLevels': return waterLevelsFile;
       default: return null;
     }
+  };
+
+  // Check if coordinates fall within US bounding boxes (continental, Alaska, Hawaii, territories)
+  const isInUS = (lat: number, lng: number): boolean => {
+    // Continental US
+    if (lat >= 24.4 && lat <= 49.4 && lng >= -125.0 && lng <= -66.9) return true;
+    // Alaska
+    if (lat >= 51.0 && lat <= 71.5 && lng >= -180.0 && lng <= -129.0) return true;
+    // Hawaii
+    if (lat >= 18.9 && lat <= 22.3 && lng >= -160.3 && lng <= -154.8) return true;
+    // Puerto Rico & USVI
+    if (lat >= 17.6 && lat <= 18.6 && lng >= -67.3 && lng <= -64.5) return true;
+    // Guam
+    if (lat >= 13.2 && lat <= 13.7 && lng >= 144.6 && lng <= 145.0) return true;
+    return false;
+  };
+
+  // Interpolate GSE from DEM APIs
+  const interpolateGSE = async () => {
+    if (!wellsFile) return;
+
+    setGseIsRunning(true);
+    setGseError('');
+    setGseInterpolated(false);
+    setGseValues(new Map());
+
+    const wellIdCol = wellsFile.mapping['well_id'];
+    const latCol = wellsFile.mapping['lat'];
+    const longCol = wellsFile.mapping['long'];
+    const wells = (wellsFile.data as Record<string, string>[])
+      .filter(w => w[wellIdCol] && w[latCol] && w[longCol])
+      .map(w => ({
+        id: w[wellIdCol],
+        lat: parseFloat(w[latCol]),
+        lng: parseFloat(w[longCol]),
+      }));
+
+    setGseProgress({ current: 0, total: wells.length });
+
+    // Determine source based on whether all wells are in US
+    const allInUS = wells.every(w => isInUS(w.lat, w.lng));
+    const results = new Map<string, number>();
+
+    try {
+      if (allInUS) {
+        setGseSource('USGS 3DEP (~10m resolution) — all wells are within US coverage');
+
+        // Parallel fetch with concurrency limit of 5
+        let completed = 0;
+        const concurrency = 5;
+        const queue = [...wells];
+        const errors: string[] = [];
+
+        const fetchOne = async () => {
+          while (queue.length > 0) {
+            const well = queue.shift()!;
+            try {
+              const url = `https://epqs.nationalmap.gov/v1/json?x=${well.lng}&y=${well.lat}&units=Meters&wkid=4326`;
+              const res = await fetch(url);
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              const data = await res.json();
+              const elevMeters = parseFloat(data.value);
+              if (!isNaN(elevMeters) && elevMeters > -100) {
+                const elev = lengthUnit === 'ft'
+                  ? Math.round(elevMeters * 3.28084 * 100) / 100
+                  : Math.round(elevMeters * 100) / 100;
+                results.set(well.id, elev);
+              }
+            } catch (err) {
+              errors.push(`Well ${well.id}: ${err}`);
+            }
+            completed++;
+            setGseProgress({ current: completed, total: wells.length });
+          }
+        };
+
+        await Promise.all(Array.from({ length: Math.min(concurrency, wells.length) }, () => fetchOne()));
+
+        if (errors.length > 0 && results.size === 0) {
+          throw new Error(`All requests failed. First error: ${errors[0]}`);
+        }
+        if (errors.length > 0) {
+          console.warn(`GSE interpolation: ${errors.length} wells failed`, errors);
+        }
+      } else {
+        setGseSource('Open-Meteo Copernicus DEM (~90m resolution) — wells outside US coverage detected');
+
+        // Batch requests of up to 100 wells
+        const batchSize = 100;
+        let completed = 0;
+
+        for (let i = 0; i < wells.length; i += batchSize) {
+          const batch = wells.slice(i, i + batchSize);
+          try {
+            const lats = batch.map(w => w.lat).join(',');
+            const lngs = batch.map(w => w.lng).join(',');
+            const url = `https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lngs}`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const elevations: number[] = data.elevation;
+            batch.forEach((well, idx) => {
+              const elevMeters = elevations[idx];
+              if (elevMeters !== undefined && !isNaN(elevMeters) && elevMeters > -1000) {
+                const elev = lengthUnit === 'ft'
+                  ? Math.round(elevMeters * 3.28084 * 100) / 100
+                  : Math.round(elevMeters * 100) / 100;
+                results.set(well.id, elev);
+              }
+            });
+          } catch (err) {
+            console.warn(`GSE batch starting at index ${i} failed:`, err);
+          }
+          completed += batch.length;
+          setGseProgress({ current: completed, total: wells.length });
+        }
+
+        if (results.size === 0) {
+          throw new Error('All batch requests failed — check network connection');
+        }
+      }
+
+      setGseValues(results);
+      setGseInterpolated(true);
+    } catch (err: any) {
+      setGseError(err.message || String(err));
+    }
+
+    setGseIsRunning(false);
   };
 
   // Validate all data
@@ -617,7 +779,7 @@ const DataManager: React.FC<DataManagerProps> = ({
         well_name: wellNameCol ? w[wellNameCol] || '' : '',
         lat: w[latCol] || '',
         long: w[longCol] || '',
-        gse: gseCol ? w[gseCol] || '' : '',
+        gse: gseCol ? w[gseCol] || '' : (gseValues.get(w[wellIdCol])?.toString() ?? ''),
         aquifer_id: singleAquifer ? singleAquiferId : (wellAqIdCol ? w[wellAqIdCol] || '' : '')
       })).filter(w => w.well_id && w.lat && w.long);
 
@@ -696,7 +858,7 @@ const DataManager: React.FC<DataManagerProps> = ({
 
       addLog(`Data ready for ${folderName}`, 'success');
 
-      setStep(6);
+      setStep(totalSteps);
 
     } catch (err) {
       addLog(`Processing failed: ${err}`, 'error');
@@ -870,7 +1032,7 @@ const DataManager: React.FC<DataManagerProps> = ({
         <header className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold text-slate-800">Import New Region</h2>
-            <p className="text-xs text-slate-500 font-medium">Step {step} of 6</p>
+            <p className="text-xs text-slate-500 font-medium">Step {step} of {totalSteps}</p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-400">
             <X size={20} />
@@ -878,8 +1040,8 @@ const DataManager: React.FC<DataManagerProps> = ({
         </header>
 
         <div className="p-6 overflow-y-auto flex-1">
-          {/* Step 1: Region Name */}
-          {step === 1 && (
+          {/* Region Name */}
+          {currentStepKind === 'region' && (
             <div>
               <h3 className="text-lg font-semibold text-slate-800 mb-4">Enter Region Name</h3>
               <input
@@ -931,8 +1093,8 @@ const DataManager: React.FC<DataManagerProps> = ({
             </div>
           )}
 
-          {/* Step 2: Upload Region File */}
-          {step === 2 && (
+          {/* Upload Region File */}
+          {currentStepKind === 'boundary' && (
             <div>
               <h3 className="text-lg font-semibold text-slate-800 mb-4">Upload Region Boundary</h3>
               <p className="text-sm text-slate-500 mb-4">
@@ -949,8 +1111,8 @@ const DataManager: React.FC<DataManagerProps> = ({
             </div>
           )}
 
-          {/* Step 3: Upload Aquifers File */}
-          {step === 3 && (
+          {/* Upload Aquifers File */}
+          {currentStepKind === 'aquifers' && (
             <div>
               <h3 className="text-lg font-semibold text-slate-800 mb-4">Upload Aquifers</h3>
               <p className="text-sm text-slate-500 mb-4">
@@ -967,8 +1129,8 @@ const DataManager: React.FC<DataManagerProps> = ({
             </div>
           )}
 
-          {/* Step 4: Upload Wells File */}
-          {step === 4 && (
+          {/* Upload Wells File */}
+          {currentStepKind === 'wells' && (
             <div>
               <h3 className="text-lg font-semibold text-slate-800 mb-4">Upload Wells</h3>
               <p className="text-sm text-slate-500 mb-4">
@@ -985,8 +1147,110 @@ const DataManager: React.FC<DataManagerProps> = ({
             </div>
           )}
 
-          {/* Step 5: Upload Water Levels File */}
-          {step === 5 && (
+          {/* GSE Interpolation Step */}
+          {currentStepKind === 'gse' && (
+            <div>
+              <h3 className="text-lg font-semibold text-slate-800 mb-4">Ground Surface Elevation</h3>
+
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg mb-4">
+                <p className="text-sm text-amber-800">
+                  Your wells file does not include a Ground Surface Elevation (GSE) column. GSE is used for
+                  elevation reference lines on charts and well tooltips. It will be estimated from a Digital
+                  Elevation Model (DEM).
+                </p>
+              </div>
+
+              {gseSource && (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg mb-4">
+                  <p className="text-sm font-medium text-slate-700">DEM Source</p>
+                  <p className="text-sm text-slate-600 mt-1">{gseSource}</p>
+                </div>
+              )}
+
+              {!gseIsRunning && !gseInterpolated && (
+                <button
+                  onClick={interpolateGSE}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold text-sm hover:bg-blue-700 transition-colors"
+                >
+                  Start GSE Interpolation
+                </button>
+              )}
+
+              {gseIsRunning && (
+                <div className="mt-4">
+                  <div className="flex items-center space-x-3 mb-2">
+                    <Loader2 size={16} className="animate-spin text-blue-600" />
+                    <span className="text-sm text-slate-600">
+                      Fetching elevations... {gseProgress.current} / {gseProgress.total}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-2">
+                    <div
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: gseProgress.total > 0 ? `${(gseProgress.current / gseProgress.total) * 100}%` : '0%' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {gseError && (
+                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-sm text-red-700">{gseError}</p>
+                  <button
+                    onClick={interpolateGSE}
+                    className="mt-2 text-sm text-red-600 hover:text-red-800 font-medium underline"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {gseInterpolated && (
+                <div className="mt-4">
+                  <div className="flex items-center space-x-2 mb-3">
+                    <CheckCircle2 size={20} className="text-green-500" />
+                    <span className="text-sm font-semibold text-green-700">
+                      Interpolated GSE for {gseValues.size} wells
+                    </span>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 sticky top-0">
+                        <tr>
+                          <th className="text-left px-3 py-2 text-slate-600 font-medium">Well</th>
+                          <th className="text-right px-3 py-2 text-slate-600 font-medium">Lat</th>
+                          <th className="text-right px-3 py-2 text-slate-600 font-medium">Long</th>
+                          <th className="text-right px-3 py-2 text-slate-600 font-medium">GSE ({lengthUnit})</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Array.from(gseValues.entries()).map(([wellId, elev]) => {
+                          const well = (wellsFile!.data as Record<string, string>[]).find(
+                            w => w[wellsFile!.mapping['well_id']] === wellId
+                          );
+                          return (
+                            <tr key={wellId} className="border-t border-slate-100">
+                              <td className="px-3 py-1.5 text-slate-700">{wellId}</td>
+                              <td className="px-3 py-1.5 text-right text-slate-500">
+                                {well ? parseFloat(well[wellsFile!.mapping['lat']]).toFixed(4) : ''}
+                              </td>
+                              <td className="px-3 py-1.5 text-right text-slate-500">
+                                {well ? parseFloat(well[wellsFile!.mapping['long']]).toFixed(4) : ''}
+                              </td>
+                              <td className="px-3 py-1.5 text-right font-mono text-slate-700">{elev}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Upload Water Levels File */}
+          {currentStepKind === 'waterLevels' && (
             <div>
               <h3 className="text-lg font-semibold text-slate-800 mb-4">Upload Water Levels</h3>
               <p className="text-sm text-slate-500 mb-4">
@@ -1003,8 +1267,8 @@ const DataManager: React.FC<DataManagerProps> = ({
             </div>
           )}
 
-          {/* Step 6: Save / Download Files */}
-          {step === 6 && (
+          {/* Save / Download Files */}
+          {currentStepKind === 'save' && (
             <div>
               <h3 className="text-lg font-semibold text-slate-800 mb-4">Save Data</h3>
 
@@ -1089,24 +1353,24 @@ const DataManager: React.FC<DataManagerProps> = ({
         <footer className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
           <button
             onClick={() => step > 1 && setStep(step - 1)}
-            disabled={step === 1 || step === 6}
+            disabled={step === 1 || currentStepKind === 'save'}
             className="flex items-center space-x-2 text-slate-600 hover:text-slate-800 text-sm font-semibold px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ChevronLeft size={16} />
             <span>Back</span>
           </button>
 
-          {step < 5 && (
+          {currentStepKind !== 'save' && currentStepKind !== 'waterLevels' && currentStepKind !== 'gse' && (
             <button
               onClick={() => {
-                if (step === 1 && !validateRegionName(regionName)) return;
+                if (currentStepKind === 'region' && !validateRegionName(regionName)) return;
                 setStep(step + 1);
               }}
               disabled={
-                (step === 1 && !regionName) ||
-                (step === 2 && !regionFile) ||
-                (step === 3 && !aquiferFile) ||
-                (step === 4 && !wellsFile)
+                (currentStepKind === 'region' && !regionName) ||
+                (currentStepKind === 'boundary' && !regionFile) ||
+                (currentStepKind === 'aquifers' && !aquiferFile) ||
+                (currentStepKind === 'wells' && !wellsFile)
               }
               className="flex items-center space-x-2 px-6 py-2 bg-slate-800 text-white rounded-lg font-bold text-sm hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -1115,7 +1379,18 @@ const DataManager: React.FC<DataManagerProps> = ({
             </button>
           )}
 
-          {step === 5 && (
+          {currentStepKind === 'gse' && (
+            <button
+              onClick={() => setStep(step + 1)}
+              disabled={!gseInterpolated}
+              className="flex items-center space-x-2 px-6 py-2 bg-slate-800 text-white rounded-lg font-bold text-sm hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>Next</span>
+              <ChevronRight size={16} />
+            </button>
+          )}
+
+          {currentStepKind === 'waterLevels' && (
             <button
               onClick={processData}
               disabled={!waterLevelsFile || isProcessing}
@@ -1125,7 +1400,7 @@ const DataManager: React.FC<DataManagerProps> = ({
             </button>
           )}
 
-          {step === 6 && (
+          {currentStepKind === 'save' && (
             <button
               onClick={onClose}
               className="px-6 py-2 bg-slate-800 text-white rounded-lg font-bold text-sm hover:bg-slate-700"
