@@ -52,6 +52,7 @@ const DataManager: React.FC<DataManagerProps> = ({
   const [step, setStep] = useState(1);
   const [regionName, setRegionName] = useState('');
   const [regionNameError, setRegionNameError] = useState('');
+  const [lengthUnit, setLengthUnit] = useState<'ft' | 'm'>('ft');
 
   const [regionFile, setRegionFile] = useState<UploadedFile | null>(null);
   const [aquiferFile, setAquiferFile] = useState<UploadedFile | null>(null);
@@ -651,7 +652,7 @@ const DataManager: React.FC<DataManagerProps> = ({
       const folderName = getFolderName(regionName);
 
       // Fetch current regions.json and add new region
-      let regionsManifest: { id: string; path: string; name: string }[] = [];
+      let regionsManifest: { id: string; path: string; name: string; lengthUnit: string }[] = [];
       try {
         const response = await fetch('/data/regions.json');
         if (response.ok) {
@@ -666,7 +667,8 @@ const DataManager: React.FC<DataManagerProps> = ({
         regionsManifest.push({
           id: folderName,
           path: `/data/${folderName}`,
-          name: regionName
+          name: regionName,
+          lengthUnit
         });
       }
 
@@ -898,6 +900,34 @@ const DataManager: React.FC<DataManagerProps> = ({
                   Folder name: <span className="font-mono text-slate-700">{getFolderName(regionName)}</span>
                 </p>
               )}
+
+              <div className="mt-6">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Length Unit</label>
+                <div className="flex space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setLengthUnit('ft')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                      lengthUnit === 'ft'
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    Feet (ft)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLengthUnit('m')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                      lengthUnit === 'm'
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    Meters (m)
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

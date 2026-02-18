@@ -2,6 +2,7 @@
 export interface Region {
   id: string;
   name: string;
+  lengthUnit: 'ft' | 'm';
   geojson: any;
   bounds: [number, number, number, number]; // [minLat, minLng, maxLat, maxLng]
 }

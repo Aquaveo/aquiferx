@@ -5,6 +5,7 @@ export const mockRegions: Region[] = [
   {
     id: 'R1',
     name: 'Virgin River Basin',
+    lengthUnit: 'ft',
     bounds: [36.9, -113.6, 37.3, -113.3],
     geojson: {
       type: 'Feature',

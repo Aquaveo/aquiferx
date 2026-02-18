@@ -194,6 +194,7 @@ export async function loadRegions(): Promise<Region[]> {
           regions.push({
             id: regionFilename || folder.name,
             name: folder.name,
+            lengthUnit: 'ft',
             geojson: geojson.type === 'FeatureCollection' ? geojson : { type: 'FeatureCollection', features: [geojson] },
             bounds
           });
@@ -213,6 +214,7 @@ export async function loadRegions(): Promise<Region[]> {
           regions.push({
             id: regionFilename || folder.name,
             name: folder.name,
+            lengthUnit: 'ft',
             geojson: geojson.type === 'FeatureCollection' ? geojson : { type: 'FeatureCollection', features: [geojson] },
             bounds
           });
@@ -406,7 +408,7 @@ export async function loadMeasurements(regionPath: string, regionId: string): Pr
 }
 
 // Load region manifest
-async function loadRegionManifest(): Promise<{ id: string; path: string; name: string }[]> {
+async function loadRegionManifest(): Promise<{ id: string; path: string; name: string; lengthUnit?: 'ft' | 'm' }[]> {
   try {
     const response = await fetch('/data/regions.json');
     if (response.ok) {
@@ -443,6 +445,7 @@ export async function loadAllData(): Promise<{
         regions.push({
           id: folder.id,
           name: folder.name,
+          lengthUnit: folder.lengthUnit || 'ft',
           geojson: geojson.type === 'FeatureCollection' ? geojson : { type: 'FeatureCollection', features: [geojson] },
           bounds
         });

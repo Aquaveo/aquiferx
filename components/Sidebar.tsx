@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Region, Aquifer } from '../types';
-import { MapPin, Droplets, List, Box, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { MapPin, Droplets, List, Box, MoreVertical, Pencil, Trash2, Download } from 'lucide-react';
 
 interface SidebarProps {
   regions: Region[];
@@ -11,7 +11,8 @@ interface SidebarProps {
   selectedAquifer: Aquifer | null;
   setSelectedAquifer: (a: Aquifer | null) => void;
   openDataManager: () => void;
-  onRenameRegion: (id: string, newName: string) => void;
+  onEditRegion: (id: string, newName: string, lengthUnit: 'ft' | 'm') => void;
+  onDownloadRegion: (id: string) => void;
   onDeleteRegion: (id: string) => void;
   onRenameAquifer: (id: string, newName: string) => void;
   onDeleteAquifer: (id: string) => void;
@@ -24,7 +25,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   aquifers,
   selectedAquifer,
   setSelectedAquifer,
-  onRenameRegion,
+  onEditRegion,
+  onDownloadRegion,
   onDeleteRegion,
   onRenameAquifer,
   onDeleteAquifer,
@@ -32,9 +34,11 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [editUnit, setEditUnit] = useState<'ft' | 'm'>('ft');
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+  const editModalRef = useRef<HTMLDivElement>(null);
 
   // Close menu on outside click
   useEffect(() => {
@@ -56,16 +60,26 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [editing]);
 
-  const startEdit = (id: string, currentName: string) => {
+  const startEditRegion = (id: string, region: Region) => {
     setMenuOpen(null);
-    setEditing(id);
+    setEditing(`region-${id}`);
+    setEditValue(region.name);
+    setEditUnit(region.lengthUnit);
+  };
+
+  const startEditAquifer = (id: string, currentName: string) => {
+    setMenuOpen(null);
+    setEditing(`aquifer-${id}`);
     setEditValue(currentName);
   };
 
   const confirmEditRegion = (id: string) => {
     const trimmed = editValue.trim();
-    if (trimmed && trimmed !== regions.find(r => r.id === id)?.name) {
-      onRenameRegion(id, trimmed);
+    if (trimmed) {
+      const region = regions.find(r => r.id === id);
+      if (trimmed !== region?.name || editUnit !== region?.lengthUnit) {
+        onEditRegion(id, trimmed, editUnit);
+      }
     }
     setEditing(null);
   };
@@ -133,7 +147,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div key={r.id} className="relative">
                   <button
                     onClick={() => {
-                      if (!isEditing) setSelectedRegion(isSelected ? null : r);
+                      setSelectedRegion(isSelected ? null : r);
                     }}
                     className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all flex items-center justify-between group ${
                       isSelected
@@ -143,51 +157,41 @@ const Sidebar: React.FC<SidebarProps> = ({
                   >
                     <div className="flex items-center space-x-3 min-w-0 flex-1">
                       <Box size={14} className={`flex-shrink-0 ${isSelected ? 'text-blue-100' : 'text-slate-300'}`} />
-                      {isEditing ? (
-                        <input
-                          ref={editInputRef}
-                          value={editValue}
-                          onChange={e => setEditValue(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') confirmEditRegion(r.id);
-                            if (e.key === 'Escape') setEditing(null);
-                          }}
-                          onBlur={() => confirmEditRegion(r.id)}
-                          onClick={e => e.stopPropagation()}
-                          className="bg-white text-slate-800 border border-blue-400 rounded px-1.5 py-0.5 text-sm font-medium w-full outline-none focus:ring-2 focus:ring-blue-300"
-                        />
-                      ) : (
-                        <span className="font-medium truncate">{r.name}</span>
-                      )}
+                      <span className="font-medium truncate">{r.name}</span>
                     </div>
                     <div className="flex items-center space-x-1 flex-shrink-0">
-                      {isSelected && !isEditing && (
+                      {isSelected && (
                         <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
                       )}
-                      {!isEditing && (
-                        <div
-                          onClick={e => {
-                            e.stopPropagation();
-                            setMenuOpen(isMenuOpen ? null : `region-${r.id}`);
-                            setConfirmDelete(null);
-                          }}
-                          className={`p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ${
-                            isSelected ? 'hover:bg-blue-500' : 'hover:bg-slate-200'
-                          } ${isMenuOpen ? 'opacity-100' : ''}`}
-                        >
-                          <MoreVertical size={14} />
-                        </div>
-                      )}
+                      <div
+                        onClick={e => {
+                          e.stopPropagation();
+                          setMenuOpen(isMenuOpen ? null : `region-${r.id}`);
+                          setConfirmDelete(null);
+                        }}
+                        className={`p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ${
+                          isSelected ? 'hover:bg-blue-500' : 'hover:bg-slate-200'
+                        } ${isMenuOpen ? 'opacity-100' : ''}`}
+                      >
+                        <MoreVertical size={14} />
+                      </div>
                     </div>
                   </button>
                   {isMenuOpen && (
                     <div ref={menuRef} className="absolute right-2 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 min-w-[120px]">
                       <button
-                        onClick={() => startEdit(`region-${r.id}`, r.name)}
+                        onClick={() => startEditRegion(r.id, r)}
                         className="w-full text-left px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center space-x-2"
                       >
                         <Pencil size={12} />
-                        <span>Rename</span>
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        onClick={() => { setMenuOpen(null); onDownloadRegion(r.id); }}
+                        className="w-full text-left px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center space-x-2"
+                      >
+                        <Download size={12} />
+                        <span>Download</span>
                       </button>
                       <button
                         onClick={() => startDelete(`region-${r.id}`)}
@@ -292,7 +296,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     {isMenuOpen && (
                       <div ref={menuRef} className="absolute right-2 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 min-w-[120px]">
                         <button
-                          onClick={() => startEdit(`aquifer-${a.id}`, a.name)}
+                          onClick={() => startEditAquifer(a.id, a.name)}
                           className="w-full text-left px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center space-x-2"
                         >
                           <Pencil size={12} />
@@ -327,6 +331,74 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Edit Region Modal */}
+      {editing && editing.startsWith('region-') && (() => {
+        const regionId = editing.replace('region-', '');
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <div ref={editModalRef} className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+              <h3 className="text-lg font-bold text-slate-800 mb-4">Edit Region</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
+                  <input
+                    ref={editInputRef}
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') confirmEditRegion(regionId);
+                      if (e.key === 'Escape') setEditing(null);
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Length Unit</label>
+                  <div className="flex space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditUnit('ft')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                        editUnit === 'ft'
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      Feet (ft)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditUnit('m')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                        editUnit === 'm'
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      Meters (m)
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  onClick={() => setEditing(null)}
+                  className="px-4 py-2 text-sm font-medium text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => confirmEditRegion(regionId)}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </aside>
   );
 };

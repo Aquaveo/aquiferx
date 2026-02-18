@@ -8,6 +8,7 @@ import Sidebar from './components/Sidebar';
 import TimeSeriesChart from './components/TimeSeriesChart';
 import DataManager from './components/DataManager';
 import DataEditor from './components/DataEditor';
+import JSZip from 'jszip';
 
 const App: React.FC = () => {
   const [regions, setRegions] = useState<Region[]>([]);
@@ -22,6 +23,7 @@ const App: React.FC = () => {
   const [selectedWells, setSelectedWells] = useState<Well[]>([]);
   const [isDataManagerOpen, setIsDataManagerOpen] = useState(false);
   const [isDataEditorOpen, setIsDataEditorOpen] = useState(false);
+  const [showGSE, setShowGSE] = useState(false);
 
   // Load data on mount
   useEffect(() => {
@@ -78,13 +80,13 @@ const App: React.FC = () => {
 
   // --- Region/Aquifer rename & delete handlers ---
 
-  const handleRenameRegion = async (regionId: string, newName: string) => {
-    setRegions(prev => prev.map(r => r.id === regionId ? { ...r, name: newName } : r));
+  const handleEditRegion = async (regionId: string, newName: string, lengthUnit: 'ft' | 'm') => {
+    setRegions(prev => prev.map(r => r.id === regionId ? { ...r, name: newName, lengthUnit } : r));
     // Persist updated regions.json manifest
     const updatedManifest = regions.map(r =>
       r.id === regionId
-        ? { id: r.id, path: `/data/${r.id}`, name: newName }
-        : { id: r.id, path: `/data/${r.id}`, name: r.name }
+        ? { id: r.id, path: `/data/${r.id}`, name: newName, lengthUnit }
+        : { id: r.id, path: `/data/${r.id}`, name: r.name, lengthUnit: r.lengthUnit }
     );
     await fetch('/api/save-data', {
       method: 'POST',
@@ -120,12 +122,38 @@ const App: React.FC = () => {
     // Update regions.json manifest
     const updatedManifest = regions
       .filter(r => r.id !== regionId)
-      .map(r => ({ id: r.id, path: `/data/${r.id}`, name: r.name }));
+      .map(r => ({ id: r.id, path: `/data/${r.id}`, name: r.name, lengthUnit: r.lengthUnit }));
     await fetch('/api/save-data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files: [{ path: 'regions.json', content: JSON.stringify(updatedManifest, null, 2) }] }),
     });
+  };
+
+  const handleDownloadRegion = async (regionId: string) => {
+    const region = regions.find(r => r.id === regionId);
+    if (!region) return;
+    const basePath = `/data/${regionId}`;
+    const fileNames = ['region.geojson', 'aquifers.geojson', 'wells.csv', 'water_levels.csv'];
+    const zip = new JSZip();
+    const folder = zip.folder(regionId)!;
+    for (const name of fileNames) {
+      try {
+        const res = await fetch(`${basePath}/${name}`);
+        if (res.ok) {
+          folder.file(name, await res.text());
+        }
+      } catch {
+        // skip files that don't exist
+      }
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${region.name.replace(/[^a-z0-9]+/gi, '_')}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleRenameAquifer = async (aquiferId: string, newName: string) => {
@@ -210,7 +238,8 @@ const App: React.FC = () => {
   const exportToCSV = () => {
     if (selectedWells.length === 0 || selectedWellMeasurements.length === 0) return;
 
-    const headers = ['Date', 'Water Table Elevation (ft)', 'Well Name', 'Aquifer ID'];
+    const unit = selectedRegion?.lengthUnit === 'm' ? 'm' : 'ft';
+    const headers = ['Date', `Water Table Elevation (${unit})`, 'Well Name', 'Aquifer ID'];
     const rows = selectedWellMeasurements
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
       .map(m => [
@@ -233,6 +262,23 @@ const App: React.FC = () => {
     link.download = `${firstName}${suffix}_water_levels.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  // Chart inline edit/delete handlers
+  const handleChartEditMeasurement = async (wellId: string, date: number, newWte: number) => {
+    const updatedMeasurements = measurements.map(m =>
+      m.wellId === wellId && new Date(m.date).getTime() === date
+        ? { ...m, wte: newWte }
+        : m
+    );
+    await handleDataEditorSave(updatedMeasurements);
+  };
+
+  const handleChartDeleteMeasurement = async (wellId: string, date: number) => {
+    const updatedMeasurements = measurements.filter(m =>
+      !(m.wellId === wellId && new Date(m.date).getTime() === date)
+    );
+    await handleDataEditorSave(updatedMeasurements);
   };
 
   // Save handler for DataEditor
@@ -304,7 +350,8 @@ const App: React.FC = () => {
           setSelectedWells([]);
         }}
         openDataManager={() => setIsDataManagerOpen(true)}
-        onRenameRegion={handleRenameRegion}
+        onEditRegion={handleEditRegion}
+        onDownloadRegion={handleDownloadRegion}
         onDeleteRegion={handleDeleteRegion}
         onRenameAquifer={handleRenameAquifer}
         onDeleteAquifer={handleDeleteAquifer}
@@ -408,6 +455,15 @@ const App: React.FC = () => {
                     </h3>
                   </div>
                   <div className="flex items-center space-x-4">
+                    <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={showGSE}
+                        onChange={(e) => setShowGSE(e.target.checked)}
+                        className="accent-blue-500"
+                      />
+                      GSE
+                    </label>
                     <button
                       onClick={() => setIsDataEditorOpen(true)}
                       disabled={selectedWells.length !== 1}
@@ -427,7 +483,7 @@ const App: React.FC = () => {
                       <span>Export CSV</span>
                     </button>
                     <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
-                      Units: Feet (WTE)
+                      Units: {selectedRegion?.lengthUnit === 'm' ? 'Meters' : 'Feet'} (WTE)
                     </div>
                   </div>
                 </div>
@@ -435,6 +491,9 @@ const App: React.FC = () => {
                   <TimeSeriesChart
                     measurements={selectedWellMeasurements}
                     selectedWells={selectedWells}
+                    showGSE={showGSE}
+                    onEditMeasurement={handleChartEditMeasurement}
+                    onDeleteMeasurement={handleChartDeleteMeasurement}
                   />
                 </div>
               </div>

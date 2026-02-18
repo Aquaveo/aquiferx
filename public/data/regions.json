@@ -2,41 +2,49 @@
   {
     "id": "oregon",
     "path": "/data/oregon",
-    "name": "Oregon - Klamath Basin"
+    "name": "Oregon - Klamath Basin",
+    "lengthUnit": "ft"
   },
   {
     "id": "utah",
     "path": "/data/utah",
-    "name": "Utah"
+    "name": "Utah",
+    "lengthUnit": "ft"
   },
   {
     "id": "dominican-republic",
     "path": "/data/dominican-republic",
-    "name": "Dominican Republic"
-  },
-  {
-    "id": "jamaica",
-    "path": "/data/jamaica",
-    "name": "Jamaica"
-  },
-  {
-    "id": "jordan",
-    "path": "/data/jordan",
-    "name": "Jordan"
-  },
-  {
-    "id": "niger",
-    "path": "/data/niger",
-    "name": "Niger"
-  },
-  {
-    "id": "guam",
-    "path": "/data/guam",
-    "name": "Guam"
+    "name": "Dominican Republic",
+    "lengthUnit": "m"
   },
   {
     "id": "volta-basin",
     "path": "/data/volta-basin",
-    "name": "Volta Basin"
+    "name": "Volta Basin",
+    "lengthUnit": "m"
+  },
+  {
+    "id": "guam",
+    "path": "/data/guam",
+    "name": "Guam",
+    "lengthUnit": "ft"
+  },
+  {
+    "id": "jordan",
+    "path": "/data/jordan",
+    "name": "Jordan",
+    "lengthUnit": "m"
+  },
+  {
+    "id": "jamaica",
+    "path": "/data/jamaica",
+    "name": "Jamaica",
+    "lengthUnit": "m"
+  },
+  {
+    "id": "niger",
+    "path": "/data/niger",
+    "name": "Niger",
+    "lengthUnit": "m"
   }
 ]
