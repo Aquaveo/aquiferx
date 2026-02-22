@@ -10,6 +10,7 @@ import DataTypeEditor from './DataTypeEditor';
 interface ImportDataHubProps {
   onClose: () => void;
   onDataChanged: () => void;
+  initialRegionId?: string | null;
 }
 
 interface RegionInfo extends RegionMeta {
@@ -93,9 +94,9 @@ async function fetchRegionList(): Promise<RegionInfo[]> {
   return infos;
 }
 
-const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged }) => {
+const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, initialRegionId }) => {
   const [regionList, setRegionList] = useState<RegionInfo[]>([]);
-  const [activeRegionId, setActiveRegionId] = useState<string | null>(null);
+  const [activeRegionId, setActiveRegionId] = useState<string | null>(initialRegionId || null);
   const [activeWizard, setActiveWizard] = useState<'region' | 'aquifer' | 'well' | 'measurement' | 'datatypes' | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 

@@ -673,6 +673,7 @@ const App: React.FC = () => {
         <ImportDataHub
           onClose={() => setIsDataManagerOpen(false)}
           onDataChanged={handleDataChanged}
+          initialRegionId={selectedRegion?.id || null}
         />
       )}
 
