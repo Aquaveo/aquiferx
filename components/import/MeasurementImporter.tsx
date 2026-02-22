@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload } from 'lucide-react';
 import { processUploadedFile, UploadedFile, saveFiles, parseDate, detectDateFormat, parseCSV, isInUS } from '../../services/importUtils';
-import { fetchUSGSMeasurements } from '../../services/usgsApi';
+import { fetchUSGSMeasurements, validateUSGSMeasurements, USGSDataQualityReport } from '../../services/usgsApi';
 import ColumnMapperModal from './ColumnMapperModal';
 import ConfirmDialog from './ConfirmDialog';
 import { DataType } from '../../types';
@@ -51,6 +51,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   // USGS download
   const [usgsIsLoading, setUsgsIsLoading] = useState(false);
   const [usgsProgress, setUsgsProgress] = useState({ completed: 0, total: 0, done: false });
+  const [qualityReport, setQualityReport] = useState<USGSDataQualityReport | null>(null);
 
   const regionOverlapsUS = isInUS(
     (regionBounds[0] + regionBounds[2]) / 2,
@@ -176,9 +177,13 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
       setUsgsProgress({ completed: 0, total: usgsSiteIds.length, done: false });
 
-      const measurements = await fetchUSGSMeasurements(usgsSiteIds, (completed, total) => {
+      const rawMeasurements = await fetchUSGSMeasurements(usgsSiteIds, (completed, total) => {
         setUsgsProgress({ completed, total, done: false });
       });
+
+      // Validate and clean data
+      const { measurements, report } = validateUSGSMeasurements(rawMeasurements);
+      setQualityReport(report);
 
       // Convert depth below land surface to WTE using GSE
       const rows = measurements.map(m => {
@@ -582,6 +587,54 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
               <button onClick={() => setShowMapper(true)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">
                 Edit Column Mapping
               </button>
+            )}
+          </div>
+        )}
+
+        {/* USGS Data Quality Report */}
+        {qualityReport && dataSource === 'usgs' && (
+          <div className="mb-4 p-4 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+            <h4 className="font-semibold text-slate-700 mb-2">Data Quality Report</h4>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="text-center p-2 bg-white rounded border">
+                <p className="text-lg font-bold text-slate-800">{qualityReport.totalRaw}</p>
+                <p className="text-xs text-slate-500">Raw records</p>
+              </div>
+              <div className="text-center p-2 bg-white rounded border">
+                <p className="text-lg font-bold text-green-600">{qualityReport.kept}</p>
+                <p className="text-xs text-slate-500">Kept</p>
+              </div>
+              <div className="text-center p-2 bg-white rounded border">
+                <p className={`text-lg font-bold ${qualityReport.dropped.count > 0 ? 'text-red-600' : 'text-slate-400'}`}>{qualityReport.dropped.count}</p>
+                <p className="text-xs text-slate-500">Dropped</p>
+              </div>
+            </div>
+            {qualityReport.fixed.count > 0 && (
+              <div className="mb-2">
+                <p className="text-xs font-medium text-amber-700 mb-1">
+                  Fixed {qualityReport.fixed.count} record(s):
+                </p>
+                <ul className="text-xs text-slate-600 space-y-0.5 max-h-24 overflow-y-auto">
+                  {qualityReport.fixed.details.map((d, i) => (
+                    <li key={i} className="pl-2 border-l-2 border-amber-300">{d}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {qualityReport.dropped.count > 0 && (
+              <div>
+                <p className="text-xs font-medium text-red-700 mb-1">
+                  Dropped {qualityReport.dropped.count} record(s):
+                </p>
+                <ul className="text-xs text-slate-600 space-y-0.5 max-h-24 overflow-y-auto">
+                  {qualityReport.dropped.details.map((d, i) => (
+                    <li key={i} className="pl-2 border-l-2 border-red-300">{d}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {qualityReport.fixed.count === 0 && qualityReport.dropped.count === 0 && (
+              <p className="text-xs text-green-600">All records passed validation.</p>
             )}
           </div>
         )}

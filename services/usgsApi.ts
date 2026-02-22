@@ -17,6 +17,13 @@ export interface USGSMeasurement {
   value: number;
 }
 
+export interface USGSDataQualityReport {
+  totalRaw: number;
+  kept: number;
+  fixed: { count: number; details: string[] };
+  dropped: { count: number; details: string[] };
+}
+
 const BASE_URL = 'https://api.waterdata.usgs.gov/ogcapi/v0';
 
 async function fetchWithRetry(url: string, maxRetries = 3): Promise<Response> {
@@ -80,6 +87,151 @@ export async function fetchUSGSWells(
   }
 
   return wells;
+}
+
+/**
+ * Validate and clean USGS measurement data.
+ * Fixes obvious date issues, drops unfixable records, and reports what happened.
+ */
+export function validateUSGSMeasurements(
+  raw: USGSMeasurement[]
+): { measurements: USGSMeasurement[]; report: USGSDataQualityReport } {
+  const report: USGSDataQualityReport = {
+    totalRaw: raw.length,
+    kept: 0,
+    fixed: { count: 0, details: [] },
+    dropped: { count: 0, details: [] },
+  };
+
+  const seen = new Set<string>();
+  const kept: USGSMeasurement[] = [];
+
+  for (const m of raw) {
+    const { date, fixDetail, dropReason } = validateDate(m.date, m.siteId);
+
+    if (dropReason) {
+      report.dropped.count++;
+      addDetail(report.dropped.details, dropReason);
+      continue;
+    }
+
+    // Validate value — drop clearly nonsensical values
+    if (m.value < -10000 || m.value > 100000) {
+      report.dropped.count++;
+      addDetail(report.dropped.details, `Extreme value (${m.value}) for ${m.siteId} on ${date}`);
+      continue;
+    }
+
+    // Deduplicate: same site + date → keep first
+    const key = `${m.siteId}|${date}`;
+    if (seen.has(key)) {
+      report.dropped.count++;
+      addDetail(report.dropped.details, `Duplicate entry for ${m.siteId} on ${date}`);
+      continue;
+    }
+    seen.add(key);
+
+    if (fixDetail) {
+      report.fixed.count++;
+      addDetail(report.fixed.details, fixDetail);
+    }
+
+    kept.push({ ...m, date });
+  }
+
+  report.kept = kept.length;
+
+  // Summarize duplicate detail if many
+  const dupCount = report.dropped.details.filter(d => d.startsWith('Duplicate')).length;
+  if (dupCount > 3) {
+    report.dropped.details = [
+      ...report.dropped.details.filter(d => !d.startsWith('Duplicate')),
+      `Duplicate entries removed: ${dupCount} total`
+    ];
+  }
+
+  return { measurements: kept, report };
+}
+
+function validateDate(raw: string, siteId: string): { date: string; fixDetail?: string; dropReason?: string } {
+  if (!raw || !raw.trim()) {
+    return { date: '', dropReason: `Missing date for ${siteId}` };
+  }
+
+  const trimmed = raw.trim();
+
+  // Already valid: YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const [y, m, d] = trimmed.split('-').map(Number);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return { date: trimmed };
+    }
+    // Month/day out of range
+    if (m < 1 || m > 12) {
+      return { date: '', dropReason: `Invalid month (${m}) in date "${trimmed}" for ${siteId}` };
+    }
+    if (d < 1 || d > 31) {
+      return { date: '', dropReason: `Invalid day (${d}) in date "${trimmed}" for ${siteId}` };
+    }
+  }
+
+  // Missing day: YYYY-MM → assume first of month
+  if (/^\d{4}-\d{2}$/.test(trimmed)) {
+    const [y, m] = trimmed.split('-').map(Number);
+    if (y > 1800 && y < 2100 && m >= 1 && m <= 12) {
+      const fixed = `${trimmed}-01`;
+      return { date: fixed, fixDetail: `Missing day in "${trimmed}" for ${siteId} → set to ${fixed}` };
+    }
+    return { date: '', dropReason: `Invalid partial date "${trimmed}" for ${siteId}` };
+  }
+
+  // Missing month and day: YYYY → assume Jan 1
+  if (/^\d{4}$/.test(trimmed)) {
+    const y = parseInt(trimmed, 10);
+    if (y > 1800 && y < 2100) {
+      const fixed = `${trimmed}-01-01`;
+      return { date: fixed, fixDetail: `Year-only date "${trimmed}" for ${siteId} → set to ${fixed}` };
+    }
+    return { date: '', dropReason: `Invalid year-only date "${trimmed}" for ${siteId}` };
+  }
+
+  // YYYY-M-D or YYYY-M-DD or YYYY-MM-D → zero-pad
+  const dashMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (dashMatch) {
+    const [, ys, ms, ds] = dashMatch;
+    const y = parseInt(ys, 10), m = parseInt(ms, 10), d = parseInt(ds, 10);
+    if (y > 1800 && y < 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      const fixed = `${ys}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      if (fixed !== trimmed) {
+        return { date: fixed, fixDetail: `Zero-padded date "${trimmed}" for ${siteId} → ${fixed}` };
+      }
+      return { date: fixed };
+    }
+    return { date: '', dropReason: `Invalid date "${trimmed}" for ${siteId}` };
+  }
+
+  // Slash formats: MM/DD/YYYY or M/D/YYYY
+  const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const [, ms, ds, ys] = slashMatch;
+    const y = parseInt(ys, 10), m = parseInt(ms, 10), d = parseInt(ds, 10);
+    if (y > 1800 && y < 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      const fixed = `${ys}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      return { date: fixed, fixDetail: `Converted date format "${trimmed}" for ${siteId} → ${fixed}` };
+    }
+  }
+
+  // Unrecognizable
+  return { date: '', dropReason: `Unrecognized date format "${trimmed}" for ${siteId}` };
+}
+
+/** Keep detail lists from growing unbounded — cap at 20 unique entries */
+function addDetail(list: string[], detail: string) {
+  if (list.length < 20) {
+    list.push(detail);
+  } else if (list.length === 20) {
+    list.push('... and more (truncated)');
+  }
 }
 
 /**
