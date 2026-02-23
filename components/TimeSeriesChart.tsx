@@ -21,6 +21,7 @@ interface TimeSeriesChartProps {
   showTrendLine: boolean;
   dataType: DataType;
   lengthUnit?: 'ft' | 'm';
+  referenceDate?: number;
   onEditMeasurement?: (wellId: string, date: number, newValue: number) => void;
   onDeleteMeasurement?: (wellId: string, date: number) => void;
 }
@@ -38,7 +39,7 @@ interface DotPosition extends SelectedPoint {
 
 const HIT_RADIUS = 15;
 
-const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selectedWells, showGSE, showTrendLine, dataType, lengthUnit = 'ft', onEditMeasurement, onDeleteMeasurement }) => {
+const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selectedWells, showGSE, showTrendLine, dataType, lengthUnit = 'ft', referenceDate, onEditMeasurement, onDeleteMeasurement }) => {
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [editModal, setEditModal] = useState(false);
@@ -497,6 +498,9 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
               />
             );
           })}
+          {referenceDate != null && (
+            <ReferenceLine x={referenceDate} stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1.5} />
+          )}
         </LineChart>
       </ResponsiveContainer>
 

@@ -1,42 +1,9 @@
 
-import React, { useEffect, useRef, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useMemo, useState, forwardRef, useImperativeHandle } from 'react';
 import L from 'leaflet';
 import { Layers, ChevronRight } from 'lucide-react';
 import { Region, Aquifer, Well, Measurement } from '../types';
-
-// Ray-casting point-in-polygon test
-function pointInRing(x: number, y: number, ring: number[][]): boolean {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0], yi = ring[i][1];
-    const xj = ring[j][0], yj = ring[j][1];
-    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
-function isPointInGeoJSON(lat: number, lng: number, geojson: any): boolean {
-  const geometries: any[] = [];
-  if (geojson.type === 'FeatureCollection') {
-    for (const f of geojson.features) if (f.geometry) geometries.push(f.geometry);
-  } else if (geojson.type === 'Feature') {
-    if (geojson.geometry) geometries.push(geojson.geometry);
-  } else if (geojson.coordinates) {
-    geometries.push(geojson);
-  }
-  for (const geom of geometries) {
-    if (geom.type === 'Polygon') {
-      if (pointInRing(lng, lat, geom.coordinates[0])) return true;
-    } else if (geom.type === 'MultiPolygon') {
-      for (const poly of geom.coordinates) {
-        if (pointInRing(lng, lat, poly[0])) return true;
-      }
-    }
-  }
-  return false;
-}
+import { isPointInGeoJSON } from '../utils/geo';
 
 const BASEMAPS = {
   'OpenStreetMap': {
@@ -93,7 +60,11 @@ interface MapViewProps {
   onWellBoxSelect: (wells: Well[]) => void;
 }
 
-const MapView: React.FC<MapViewProps> = ({
+export interface MapViewHandle {
+  getMap(): L.Map | null;
+}
+
+const MapView = forwardRef<MapViewHandle, MapViewProps>(({
   regions,
   aquifers,
   wells,
@@ -108,7 +79,7 @@ const MapView: React.FC<MapViewProps> = ({
   onAquiferClick,
   onWellClick,
   onWellBoxSelect
-}) => {
+}, ref) => {
   // Count measurements per well for the active data type
   const wellMeasurementCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -120,6 +91,10 @@ const MapView: React.FC<MapViewProps> = ({
     return counts;
   }, [measurements, selectedDataType]);
   const mapRef = useRef<L.Map | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    getMap: () => mapRef.current,
+  }), []);
   const basemapLayerRef = useRef<L.TileLayer | null>(null);
   const regionLayerRef = useRef<L.FeatureGroup | null>(null);
   const aquiferLayerRef = useRef<L.FeatureGroup | null>(null);
@@ -658,6 +633,6 @@ const MapView: React.FC<MapViewProps> = ({
       </div>
     </div>
   );
-};
+});
 
 export default MapView;

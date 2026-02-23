@@ -1,6 +1,6 @@
 import shp from 'shpjs';
 import polylabel from 'polylabel';
-import { Region, Aquifer, Well, Measurement, RegionMeta } from '../types';
+import { Region, Aquifer, Well, Measurement, RegionMeta, StorageAnalysisMeta } from '../types';
 import { freshFetch } from './importUtils';
 
 interface DataFolder {
@@ -372,6 +372,7 @@ export async function loadAllData(): Promise<{
   aquifers: Aquifer[];
   wells: Well[];
   measurements: Measurement[];
+  storageMeta: StorageAnalysisMeta[];
 }> {
   const regionMetas = await loadRegionManifest();
 
@@ -379,6 +380,7 @@ export async function loadAllData(): Promise<{
   const allAquifers: Aquifer[] = [];
   const allWells: Well[] = [];
   const allMeasurements: Measurement[] = [];
+  const allStorageMeta: StorageAnalysisMeta[] = [];
 
   for (const meta of regionMetas) {
     const folderPath = `/data/${meta.id}`;
@@ -415,12 +417,24 @@ export async function loadAllData(): Promise<{
     const dataTypes = meta.dataTypes || [{ code: 'wte', name: 'Water Table Elevation', unit: meta.lengthUnit || 'ft' }];
     const measurements = await loadMeasurements(folderPath, meta.id, dataTypes);
     for (const m of measurements) allMeasurements.push(m);
+
+    // Load storage analysis metadata
+    try {
+      const storageRes = await freshFetch(`/api/list-storage?region=${encodeURIComponent(meta.id)}`);
+      if (storageRes.ok) {
+        const items: StorageAnalysisMeta[] = await storageRes.json();
+        for (const item of items) allStorageMeta.push(item);
+      }
+    } catch (e) {
+      console.warn(`Error loading storage metadata for ${meta.id}:`, e);
+    }
   }
 
   return {
     regions,
     aquifers: allAquifers,
     wells: allWells,
-    measurements: allMeasurements
+    measurements: allMeasurements,
+    storageMeta: allStorageMeta,
   };
 }

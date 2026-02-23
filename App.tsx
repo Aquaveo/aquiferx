@@ -1,13 +1,18 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table } from 'lucide-react';
-import { Region, Aquifer, Well, Measurement, DataType } from './types';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3 } from 'lucide-react';
+import { Region, Aquifer, Well, Measurement, DataType, StorageAnalysisResult, StorageAnalysisMeta } from './types';
 import { loadAllData } from './services/dataLoader';
-import MapView from './components/MapView';
+import MapView, { MapViewHandle } from './components/MapView';
 import Sidebar from './components/Sidebar';
 import TimeSeriesChart from './components/TimeSeriesChart';
 import ImportDataHub from './components/import/ImportDataHub';
 import DataEditor from './components/DataEditor';
+import StorageAnalysisDialog from './components/StorageAnalysisDialog';
+import StorageOverlay from './components/StorageOverlay';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
+} from 'recharts';
 import JSZip from 'jszip';
 
 const TREND_THRESHOLDS_FT = { extreme: 2.0, moderate: 0.5 };
@@ -75,6 +80,13 @@ const App: React.FC = () => {
   const [showTrends, setShowTrends] = useState(false);
   const [selectedDataType, setSelectedDataType] = useState<string>('wte');
   const [visibleRegionIds, setVisibleRegionIds] = useState<Set<string>>(new Set());
+  const [storageDialogOpen, setStorageDialogOpen] = useState(false);
+  const [storageResult, setStorageResult] = useState<StorageAnalysisResult | null>(null);
+  const [storageMeta, setStorageMeta] = useState<StorageAnalysisMeta[]>([]);
+  const [loadingStorageCode, setLoadingStorageCode] = useState<string | null>(null);
+  const [activeTimeSeriesTab, setActiveTimeSeriesTab] = useState<'waterLevel' | 'storageChange'>('waterLevel');
+  const [storageFrameDate, setStorageFrameDate] = useState<{ date: string; dateTs: number } | null>(null);
+  const mapViewRef = useRef<MapViewHandle>(null);
 
   // Keep visibleRegionIds in sync when regions load/change
   useEffect(() => {
@@ -107,6 +119,21 @@ const App: React.FC = () => {
     setAquiferTrendColors(null);
     setShowTrends(false);
   }, [selectedRegion?.id, selectedDataType]);
+
+  // Clear active storage overlay when aquifer changes
+  useEffect(() => {
+    setStorageResult(null);
+  }, [selectedAquifer?.id]);
+
+  // Auto-switch time series tab based on storage result
+  useEffect(() => {
+    if (storageResult) {
+      setActiveTimeSeriesTab('storageChange');
+    } else {
+      setActiveTimeSeriesTab('waterLevel');
+      setStorageFrameDate(null);
+    }
+  }, [storageResult]);
 
   const analyzeTrends = () => {
     if (showTrends) {
@@ -178,7 +205,8 @@ const App: React.FC = () => {
         setAquifers(data.aquifers);
         setWells(data.wells);
         setMeasurements(data.measurements);
-        console.log(`Loaded: ${data.regions.length} regions, ${data.aquifers.length} aquifers, ${data.wells.length} wells, ${data.measurements.length} measurements`);
+        setStorageMeta(data.storageMeta);
+        console.log(`Loaded: ${data.regions.length} regions, ${data.aquifers.length} aquifers, ${data.wells.length} wells, ${data.measurements.length} measurements, ${data.storageMeta.length} storage analyses`);
       } catch (e) {
         console.error('Failed to load data:', e);
         setLoadError(e instanceof Error ? e.message : 'Failed to load data');
@@ -197,8 +225,57 @@ const App: React.FC = () => {
       setAquifers(data.aquifers);
       setWells(data.wells);
       setMeasurements(data.measurements);
+      setStorageMeta(data.storageMeta);
     } catch (e) {
       console.error('Failed to reload data:', e);
+    }
+  };
+
+  // Load full storage analysis from file
+  const handleLoadStorage = async (meta: StorageAnalysisMeta) => {
+    setLoadingStorageCode(meta.code);
+    try {
+      const res = await fetch(`/data/${meta.regionId}/storage_${meta.code}.json`);
+      if (res.ok) {
+        const fullResult: StorageAnalysisResult = await res.json();
+        // Select the aquifer if not already selected
+        if (!selectedAquifer || selectedAquifer.id !== meta.aquiferId) {
+          const aq = aquifers.find(a => a.id === meta.aquiferId && a.regionId === meta.regionId);
+          if (aq) setSelectedAquifer(aq);
+        }
+        setStorageResult(fullResult);
+      }
+    } catch (e) {
+      console.error('Failed to load storage analysis:', e);
+    } finally {
+      setLoadingStorageCode(null);
+    }
+  };
+
+  const handleStorageFrameChange = useCallback((date: string, dateTs: number) => {
+    setStorageFrameDate({ date, dateTs });
+  }, []);
+
+  const handleUnloadStorage = () => {
+    setStorageResult(null);
+  };
+
+  const handleDeleteStorage = async (meta: StorageAnalysisMeta) => {
+    // Unload if this is the active raster
+    if (storageResult?.code === meta.code) {
+      setStorageResult(null);
+    }
+    // Remove from metadata list
+    setStorageMeta(prev => prev.filter(m => !(m.code === meta.code && m.regionId === meta.regionId)));
+    // Delete the file on disk
+    try {
+      await fetch('/api/delete-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: `${meta.regionId}/storage_${meta.code}.json` }),
+      });
+    } catch (e) {
+      console.error('Failed to delete storage analysis file:', e);
     }
   };
 
@@ -225,6 +302,14 @@ const App: React.FC = () => {
       ? measurements.filter(m => selectedWells.some(w => w.id === m.wellId) && m.dataType === selectedDataType)
       : [],
   [selectedWells, measurements, selectedDataType]);
+
+  const storageChartData = useMemo(() => {
+    if (!storageResult) return [];
+    return storageResult.storageSeries.map(s => ({
+      date: new Date(s.date).getTime(),
+      value: s.value,
+    }));
+  }, [storageResult]);
 
   const handleWellClick = (well: Well, shiftKey: boolean) => {
     if (shiftKey) {
@@ -642,6 +727,12 @@ const App: React.FC = () => {
         onDeleteRegion={handleDeleteRegion}
         onRenameAquifer={handleRenameAquifer}
         onDeleteAquifer={handleDeleteAquifer}
+        storageMeta={storageMeta}
+        activeStorageCode={storageResult?.code || null}
+        loadingStorageCode={loadingStorageCode}
+        onLoadStorage={handleLoadStorage}
+        onUnloadStorage={handleUnloadStorage}
+        onDeleteStorage={handleDeleteStorage}
       />
 
       {/* Main Content Area */}
@@ -725,6 +816,15 @@ const App: React.FC = () => {
                 <span>Analyze Trends</span>
               </button>
             )}
+            {selectedAquifer && (
+              <button
+                onClick={() => setStorageDialogOpen(true)}
+                className="flex items-center space-x-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-md text-sm font-medium hover:bg-emerald-100 transition-colors"
+              >
+                <BarChart3 size={16} />
+                <span>Analyze Storage</span>
+              </button>
+            )}
             <button
               onClick={() => setIsDataManagerOpen(true)}
               className="flex items-center space-x-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors"
@@ -739,6 +839,7 @@ const App: React.FC = () => {
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 relative">
             <MapView
+              ref={mapViewRef}
               regions={regions.filter(r => visibleRegionIds.has(r.id))}
               aquifers={filteredAquifers}
               wells={filteredWells}
@@ -824,81 +925,157 @@ const App: React.FC = () => {
                 </div>
               );
             })()}
+            {/* Storage Overlay */}
+            {storageResult && mapViewRef.current?.getMap() && (
+              <StorageOverlay
+                analysis={storageResult}
+                map={mapViewRef.current.getMap()!}
+                onClose={() => setStorageResult(null)}
+                onFrameChange={handleStorageFrameChange}
+              />
+            )}
           </div>
 
           {/* Time Series Section */}
-          <div className={`transition-all duration-300 ease-in-out border-t border-slate-200 bg-white ${selectedWells.length > 0 ? 'h-1/3' : 'h-0 overflow-hidden'}`}>
-            {selectedWells.length > 0 && (
-              <div className="p-4 h-full flex flex-col">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center space-x-2">
-                    <Activity size={18} className="text-blue-500" />
-                    <h3 className="font-bold text-slate-800">
-                      {activeDataType.name}: {
-                        selectedWells.length <= 3
-                          ? selectedWells.map(w => w.name).join(', ')
-                          : `${selectedWells.length} wells selected`
-                      }
-                    </h3>
-                  </div>
-                  <div className="flex items-center space-x-4">
-                    {activeDataType.code === 'wte' && (
-                      <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={showGSE}
-                          onChange={(e) => setShowGSE(e.target.checked)}
-                          className="accent-blue-500"
-                        />
-                        GSE
-                      </label>
-                    )}
-                    <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={showTrendLine}
-                        onChange={(e) => setShowTrendLine(e.target.checked)}
-                        className="accent-blue-500"
-                      />
-                      Trend Line
-                    </label>
-                    <button
-                      onClick={() => setIsDataEditorOpen(true)}
-                      disabled={selectedWells.length !== 1}
-                      className="flex items-center space-x-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      title={selectedWells.length !== 1 ? 'Select a single well to edit' : 'View/Edit measurement data'}
-                    >
-                      <Table size={14} />
-                      <span>View/Edit</span>
-                    </button>
-                    <button
-                      onClick={exportToCSV}
-                      disabled={selectedWellMeasurements.length === 0}
-                      className="flex items-center space-x-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-md text-sm font-medium hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      title="Export data to CSV"
-                    >
-                      <Download size={14} />
-                      <span>Export CSV</span>
-                    </button>
-                    <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
-                      Units: {activeDataType.unit === 'm' ? 'Meters' : activeDataType.unit === 'ft' ? 'Feet' : activeDataType.unit} ({activeDataType.code.toUpperCase()})
+          <div className={`transition-all duration-300 ease-in-out border-t border-slate-200 bg-white ${
+            (selectedWells.length > 0 || storageResult) ? 'h-1/3' : 'h-0 overflow-hidden'
+          }`}>
+            {(selectedWells.length > 0 || storageResult) && (() => {
+              const showBothTabs = selectedWells.length > 0 && storageResult !== null;
+              const effectiveTab = showBothTabs ? activeTimeSeriesTab : (storageResult ? 'storageChange' : 'waterLevel');
+              return (
+                <div className="p-4 h-full flex flex-col">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center space-x-3">
+                      {showBothTabs && (
+                        <div className="flex bg-slate-100 rounded-md p-0.5">
+                          <button
+                            onClick={() => setActiveTimeSeriesTab('waterLevel')}
+                            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                              effectiveTab === 'waterLevel' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                          >
+                            Water Level
+                          </button>
+                          <button
+                            onClick={() => setActiveTimeSeriesTab('storageChange')}
+                            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                              effectiveTab === 'storageChange' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                          >
+                            Storage Change
+                          </button>
+                        </div>
+                      )}
+                      {effectiveTab === 'waterLevel' ? (
+                        <>
+                          {!showBothTabs && <Activity size={18} className="text-blue-500" />}
+                          <h3 className="font-bold text-slate-800">
+                            {activeDataType.name}: {
+                              selectedWells.length <= 3
+                                ? selectedWells.map(w => w.name).join(', ')
+                                : `${selectedWells.length} wells selected`
+                            }
+                          </h3>
+                        </>
+                      ) : (
+                        <>
+                          {!showBothTabs && <BarChart3 size={18} className="text-emerald-500" />}
+                          <h3 className="font-bold text-slate-800">Storage Change: {storageResult!.title}</h3>
+                          <span className="text-xs text-slate-400">({storageResult!.params.volumeUnit})</span>
+                        </>
+                      )}
+                    </div>
+                    <div className="flex items-center space-x-4">
+                      {effectiveTab === 'waterLevel' ? (
+                        <>
+                          {activeDataType.code === 'wte' && (
+                            <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                              <input type="checkbox" checked={showGSE} onChange={(e) => setShowGSE(e.target.checked)} className="accent-blue-500" />
+                              GSE
+                            </label>
+                          )}
+                          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                            <input type="checkbox" checked={showTrendLine} onChange={(e) => setShowTrendLine(e.target.checked)} className="accent-blue-500" />
+                            Trend Line
+                          </label>
+                          <button
+                            onClick={() => setIsDataEditorOpen(true)}
+                            disabled={selectedWells.length !== 1}
+                            className="flex items-center space-x-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={selectedWells.length !== 1 ? 'Select a single well to edit' : 'View/Edit measurement data'}
+                          >
+                            <Table size={14} />
+                            <span>View/Edit</span>
+                          </button>
+                          <button
+                            onClick={exportToCSV}
+                            disabled={selectedWellMeasurements.length === 0}
+                            className="flex items-center space-x-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-md text-sm font-medium hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Export data to CSV"
+                          >
+                            <Download size={14} />
+                            <span>Export CSV</span>
+                          </button>
+                          <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
+                            Units: {activeDataType.unit === 'm' ? 'Meters' : activeDataType.unit === 'ft' ? 'Feet' : activeDataType.unit} ({activeDataType.code.toUpperCase()})
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-[10px] text-slate-400">
+                          Sc={storageResult!.params.storageCoefficient} &bull; {storageResult!.params.interval} &bull; res={storageResult!.params.resolution}
+                        </div>
+                      )}
                     </div>
                   </div>
+                  <div className="flex-1 min-h-0">
+                    {effectiveTab === 'waterLevel' ? (
+                      <TimeSeriesChart
+                        measurements={selectedWellMeasurements}
+                        selectedWells={selectedWells}
+                        showGSE={showGSE && activeDataType.code === 'wte'}
+                        showTrendLine={showTrendLine}
+                        dataType={activeDataType}
+                        lengthUnit={selectedRegion?.lengthUnit || 'ft'}
+                        onEditMeasurement={handleChartEditMeasurement}
+                        onDeleteMeasurement={handleChartDeleteMeasurement}
+                        referenceDate={storageResult && storageFrameDate ? storageFrameDate.dateTs : undefined}
+                      />
+                    ) : storageResult && (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={storageChartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                          <XAxis
+                            dataKey="date" type="number" domain={['auto', 'auto']}
+                            tickFormatter={(t: number) => new Date(t).getFullYear().toString()}
+                            stroke="#94a3b8" fontSize={10}
+                          />
+                          <YAxis stroke="#94a3b8" fontSize={10}
+                            tickFormatter={(v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            label={{ value: storageResult.params.volumeUnit, angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#94a3b8', fontSize: 10 } }}
+                          />
+                          <Tooltip
+                            content={({ label, payload }) => {
+                              if (!payload || payload.length === 0) return null;
+                              return (
+                                <div className="bg-white rounded shadow-md px-2 py-1 text-[10px] border border-slate-200">
+                                  <div className="text-slate-400">{new Date(label as number).toLocaleDateString()}</div>
+                                  <div className="text-slate-700 font-medium">{(payload[0]?.value as number)?.toLocaleString(undefined, { maximumFractionDigits: 1 })} {storageResult.params.volumeUnit}</div>
+                                </div>
+                              );
+                            }}
+                          />
+                          <Line type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981' }} isAnimationActive={false} />
+                          {storageFrameDate && (
+                            <ReferenceLine x={storageFrameDate.dateTs} stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1.5} />
+                          )}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
                 </div>
-                <div className="flex-1 min-h-0">
-                  <TimeSeriesChart
-                    measurements={selectedWellMeasurements}
-                    selectedWells={selectedWells}
-                    showGSE={showGSE && activeDataType.code === 'wte'}
-                    showTrendLine={showTrendLine}
-                    dataType={activeDataType}
-                    lengthUnit={selectedRegion?.lengthUnit || 'ft'}
-                    onEditMeasurement={handleChartEditMeasurement}
-                    onDeleteMeasurement={handleChartDeleteMeasurement}
-                  />
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
       </main>
@@ -909,6 +1086,31 @@ const App: React.FC = () => {
           onClose={() => setIsDataManagerOpen(false)}
           onDataChanged={handleDataChanged}
           initialRegionId={selectedRegion?.id || null}
+        />
+      )}
+
+      {/* Storage Analysis Dialog */}
+      {storageDialogOpen && selectedAquifer && selectedRegion && (
+        <StorageAnalysisDialog
+          aquifer={selectedAquifer}
+          region={selectedRegion}
+          wells={wells.filter(w => w.aquiferId === selectedAquifer.id && w.regionId === selectedAquifer.regionId)}
+          measurements={measurements}
+          existingCodes={storageMeta.filter(a => a.aquiferId === selectedAquifer.id).map(a => a.code)}
+          onClose={() => setStorageDialogOpen(false)}
+          onComplete={(result) => {
+            setStorageResult(result);
+            setStorageMeta(prev => [...prev, {
+              title: result.title,
+              code: result.code,
+              aquiferId: result.aquiferId,
+              aquiferName: result.aquiferName,
+              regionId: result.regionId,
+              params: result.params,
+              createdAt: result.createdAt,
+            }]);
+            setStorageDialogOpen(false);
+          }}
         />
       )}
 

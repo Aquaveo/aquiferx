@@ -100,6 +100,55 @@ function saveDataPlugin(): Plugin {
         });
       });
 
+      // GET /api/list-storage?region={id} — list storage analysis metadata
+      server.middlewares.use('/api/list-storage', (req, res) => {
+        if (req.method !== 'GET') {
+          res.statusCode = 405;
+          res.end('Method not allowed');
+          return;
+        }
+        try {
+          const url = new URL(req.url || '', 'http://localhost');
+          const regionId = url.searchParams.get('region');
+          if (!regionId) {
+            res.statusCode = 400;
+            res.end('Missing region parameter');
+            return;
+          }
+          const dataDir = path.resolve(__dirname, 'public/data');
+          const regionDir = path.resolve(dataDir, regionId);
+          if (!regionDir.startsWith(dataDir + path.sep)) {
+            res.statusCode = 400;
+            res.end('Invalid region');
+            return;
+          }
+          const results: any[] = [];
+          if (fs.existsSync(regionDir)) {
+            for (const entry of fs.readdirSync(regionDir)) {
+              if (entry.startsWith('storage_') && entry.endsWith('.json')) {
+                try {
+                  const data = JSON.parse(fs.readFileSync(path.join(regionDir, entry), 'utf-8'));
+                  results.push({
+                    title: data.title || entry,
+                    code: data.code || entry.replace('storage_', '').replace('.json', ''),
+                    aquiferId: data.aquiferId || '',
+                    aquiferName: data.aquiferName || '',
+                    regionId: data.regionId || regionId,
+                    params: data.params || {},
+                    createdAt: data.createdAt || '',
+                  });
+                } catch { /* skip malformed */ }
+              }
+            }
+          }
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(results));
+        } catch (err) {
+          res.statusCode = 500;
+          res.end(String(err));
+        }
+      });
+
       server.middlewares.use('/api/save-data', (req, res) => {
         if (req.method !== 'POST') {
           res.statusCode = 405;

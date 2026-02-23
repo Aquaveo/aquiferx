@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Region, Aquifer } from '../types';
-import { MapPin, Droplets, List, Box, MoreVertical, Pencil, Trash2, Download, AlertTriangle } from 'lucide-react';
+import { Region, Aquifer, StorageAnalysisMeta } from '../types';
+import { MapPin, Droplets, List, Box, MoreVertical, Pencil, Trash2, Download, AlertTriangle, Plus, Minus, Layers, Loader2 } from 'lucide-react';
 
 interface SidebarProps {
   regions: Region[];
@@ -18,6 +18,12 @@ interface SidebarProps {
   onDeleteRegion: (id: string) => void;
   onRenameAquifer: (id: string, newName: string) => void;
   onDeleteAquifer: (id: string) => void;
+  storageMeta: StorageAnalysisMeta[];
+  activeStorageCode: string | null;
+  loadingStorageCode: string | null;
+  onLoadStorage: (meta: StorageAnalysisMeta) => void;
+  onUnloadStorage: () => void;
+  onDeleteStorage: (meta: StorageAnalysisMeta) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -34,9 +40,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeleteRegion,
   onRenameAquifer,
   onDeleteAquifer,
+  storageMeta,
+  activeStorageCode,
+  loadingStorageCode,
+  onLoadStorage,
+  onUnloadStorage,
+  onDeleteStorage,
 }) => {
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [expandedAquiferIds, setExpandedAquiferIds] = useState<Set<string>>(new Set());
   const [editValue, setEditValue] = useState('');
   const [editUnit, setEditUnit] = useState<'ft' | 'm'>('ft');
   const [editSingleUnit, setEditSingleUnit] = useState(false);
@@ -117,6 +130,15 @@ const Sidebar: React.FC<SidebarProps> = ({
   const startDelete = (id: string) => {
     setMenuOpen(null);
     setConfirmDelete(id);
+  };
+
+  const toggleRasterExpand = (aquiferId: string) => {
+    setExpandedAquiferIds(prev => {
+      const next = new Set(prev);
+      if (next.has(aquiferId)) next.delete(aquiferId);
+      else next.add(aquiferId);
+      return next;
+    });
   };
 
   return (
@@ -252,6 +274,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                 const isEditing = editing === `aquifer-${a.id}`;
                 const isConfirming = confirmDelete === `aquifer-${a.id}`;
                 const isMenuOpen = menuOpen === `aquifer-${a.id}`;
+                const aquiferRasters = storageMeta.filter(m => m.aquiferId === a.id && m.regionId === a.regionId);
+                const hasRasters = aquiferRasters.length > 0;
+                const isExpanded = expandedAquiferIds.has(a.id);
 
                 if (isConfirming) {
                   return (
@@ -276,67 +301,181 @@ const Sidebar: React.FC<SidebarProps> = ({
                 }
 
                 return (
-                  <div key={a.id} className="relative">
-                    <button
-                      onClick={() => {
-                        if (!isEditing) setSelectedAquifer(isSelected ? null : a);
-                      }}
-                      className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all flex items-center group ${
-                        isSelected
-                          ? 'bg-indigo-500 text-white shadow-md'
-                          : 'text-slate-600 hover:bg-slate-50 hover:text-indigo-500'
-                      }`}
-                    >
-                      <List size={14} className={`mr-3 flex-shrink-0 ${isSelected ? 'text-indigo-100' : 'text-slate-300'}`} />
-                      <div className="flex-1 min-w-0">
-                        {isEditing ? (
-                          <input
-                            ref={editInputRef}
-                            value={editValue}
-                            onChange={e => setEditValue(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') confirmEditAquifer(a.id);
-                              if (e.key === 'Escape') setEditing(null);
+                  <div key={a.id}>
+                    <div className="relative">
+                      <button
+                        onClick={() => {
+                          if (!isEditing) setSelectedAquifer(isSelected ? null : a);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all flex items-center group ${
+                          isSelected
+                            ? 'bg-indigo-500 text-white shadow-md'
+                            : 'text-slate-600 hover:bg-slate-50 hover:text-indigo-500'
+                        }`}
+                      >
+                        <List size={14} className={`mr-3 flex-shrink-0 ${isSelected ? 'text-indigo-100' : 'text-slate-300'}`} />
+                        <div className="flex-1 min-w-0">
+                          {isEditing ? (
+                            <input
+                              ref={editInputRef}
+                              value={editValue}
+                              onChange={e => setEditValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') confirmEditAquifer(a.id);
+                                if (e.key === 'Escape') setEditing(null);
+                              }}
+                              onBlur={() => confirmEditAquifer(a.id)}
+                              onClick={e => e.stopPropagation()}
+                              className="bg-white text-slate-800 border border-indigo-400 rounded px-1.5 py-0.5 text-sm font-medium w-full outline-none focus:ring-2 focus:ring-indigo-300"
+                            />
+                          ) : (
+                            <span className="font-medium truncate block">{a.name}</span>
+                          )}
+                        </div>
+                        {hasRasters && !isEditing && (
+                          <div
+                            onClick={e => {
+                              e.stopPropagation();
+                              toggleRasterExpand(a.id);
                             }}
-                            onBlur={() => confirmEditAquifer(a.id)}
-                            onClick={e => e.stopPropagation()}
-                            className="bg-white text-slate-800 border border-indigo-400 rounded px-1.5 py-0.5 text-sm font-medium w-full outline-none focus:ring-2 focus:ring-indigo-300"
-                          />
-                        ) : (
-                          <span className="font-medium truncate block">{a.name}</span>
+                            className={`w-5 h-5 flex items-center justify-center rounded flex-shrink-0 ml-1 transition-colors cursor-pointer ${
+                              isSelected
+                                ? 'hover:bg-indigo-400 text-indigo-100'
+                                : 'hover:bg-slate-200 text-slate-400'
+                            }`}
+                            title={isExpanded ? 'Collapse storage analyses' : 'Show storage analyses'}
+                          >
+                            {isExpanded
+                              ? <Minus size={12} />
+                              : <Plus size={12} />}
+                          </div>
                         )}
-                      </div>
-                      {!isEditing && (
-                        <div
-                          onClick={e => {
-                            e.stopPropagation();
-                            setMenuOpen(isMenuOpen ? null : `aquifer-${a.id}`);
-                            setConfirmDelete(null);
-                          }}
-                          className={`p-0.5 rounded ml-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ${
-                            isSelected ? 'hover:bg-indigo-400' : 'hover:bg-slate-200'
-                          } ${isMenuOpen ? 'opacity-100' : ''}`}
-                        >
-                          <MoreVertical size={14} />
+                        {!isEditing && (
+                          <div
+                            onClick={e => {
+                              e.stopPropagation();
+                              setMenuOpen(isMenuOpen ? null : `aquifer-${a.id}`);
+                              setConfirmDelete(null);
+                            }}
+                            className={`p-0.5 rounded ml-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ${
+                              isSelected ? 'hover:bg-indigo-400' : 'hover:bg-slate-200'
+                            } ${isMenuOpen ? 'opacity-100' : ''}`}
+                          >
+                            <MoreVertical size={14} />
+                          </div>
+                        )}
+                      </button>
+                      {isMenuOpen && (
+                        <div ref={menuRef} className="absolute right-2 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 min-w-[120px]">
+                          <button
+                            onClick={() => startEditAquifer(a.id, a.name)}
+                            className="w-full text-left px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center space-x-2"
+                          >
+                            <Pencil size={12} />
+                            <span>Rename</span>
+                          </button>
+                          <button
+                            onClick={() => startDelete(`aquifer-${a.id}`)}
+                            className="w-full text-left px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
+                          >
+                            <Trash2 size={12} />
+                            <span>Delete</span>
+                          </button>
                         </div>
                       )}
-                    </button>
-                    {isMenuOpen && (
-                      <div ref={menuRef} className="absolute right-2 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 min-w-[120px]">
-                        <button
-                          onClick={() => startEditAquifer(a.id, a.name)}
-                          className="w-full text-left px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center space-x-2"
-                        >
-                          <Pencil size={12} />
-                          <span>Rename</span>
-                        </button>
-                        <button
-                          onClick={() => startDelete(`aquifer-${a.id}`)}
-                          className="w-full text-left px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
-                        >
-                          <Trash2 size={12} />
-                          <span>Delete</span>
-                        </button>
+                    </div>
+                    {/* Expandable storage analyses list */}
+                    {isExpanded && aquiferRasters.length > 0 && (
+                      <div className="ml-8 mt-0.5 mb-1 space-y-0.5">
+                        {aquiferRasters.map(m => {
+                          const isActive = activeStorageCode === m.code;
+                          const isLoading = loadingStorageCode === m.code;
+                          const rasterMenuKey = `raster-${m.regionId}-${m.code}`;
+                          const isRasterMenuOpen = menuOpen === rasterMenuKey;
+                          const isRasterConfirming = confirmDelete === rasterMenuKey;
+
+                          if (isRasterConfirming) {
+                            return (
+                              <div key={m.code} className="px-2 py-1.5 rounded bg-red-50 border border-red-200 text-xs">
+                                <p className="text-red-700 font-medium mb-1.5">Delete "{m.title}"?</p>
+                                <div className="flex space-x-2">
+                                  <button
+                                    onClick={() => { onDeleteStorage(m); setConfirmDelete(null); }}
+                                    className="px-2 py-0.5 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700"
+                                  >
+                                    Delete
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmDelete(null)}
+                                    className="px-2 py-0.5 bg-white text-slate-600 rounded text-[10px] font-medium border border-slate-200 hover:bg-slate-50"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div key={m.code} className="relative group/raster">
+                              <div className={`flex items-center rounded transition-colors ${
+                                isActive
+                                  ? 'bg-emerald-50'
+                                  : 'hover:bg-slate-50'
+                              }`}>
+                                <button
+                                  onClick={() => isActive ? onUnloadStorage() : onLoadStorage(m)}
+                                  className={`flex-1 text-left pl-2 pr-1 py-1.5 text-xs flex items-center gap-2 min-w-0 ${
+                                    isActive
+                                      ? 'text-emerald-700 font-medium'
+                                      : 'text-slate-500 hover:text-slate-700'
+                                  }`}
+                                >
+                                  {isLoading
+                                    ? <Loader2 size={12} className="flex-shrink-0 animate-spin" />
+                                    : <Layers size={12} className={`flex-shrink-0 ${isActive ? 'text-emerald-500' : 'text-slate-300'}`} />}
+                                  <span className="truncate">{m.title}</span>
+                                  {isActive && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />}
+                                </button>
+                                <div
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setMenuOpen(isRasterMenuOpen ? null : rasterMenuKey);
+                                    setConfirmDelete(null);
+                                  }}
+                                  className={`p-0.5 rounded mr-1 flex-shrink-0 opacity-0 group-hover/raster:opacity-100 transition-opacity cursor-pointer hover:bg-slate-200 ${
+                                    isRasterMenuOpen ? 'opacity-100' : ''
+                                  }`}
+                                >
+                                  <MoreVertical size={12} />
+                                </div>
+                              </div>
+                              {isRasterMenuOpen && (
+                                <div ref={menuRef} className="absolute right-1 top-full mt-0.5 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 min-w-[100px]">
+                                  <button
+                                    onClick={() => { setMenuOpen(null); setConfirmDelete(rasterMenuKey); }}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 flex items-center space-x-2"
+                                  >
+                                    <Trash2 size={11} />
+                                    <span>Delete</span>
+                                  </button>
+                                </div>
+                              )}
+                              {/* Hover metadata tooltip */}
+                              <div className="absolute left-full ml-2 top-0 hidden group-hover/raster:block z-[60] pointer-events-none">
+                                <div className="bg-slate-800 text-white text-[11px] rounded-lg p-3 shadow-xl min-w-[220px] leading-relaxed">
+                                  <div className="font-semibold text-emerald-300 mb-1.5">{m.title}</div>
+                                  <div><span className="text-slate-400">Dates:</span> {m.params.startDate} &mdash; {m.params.endDate}</div>
+                                  <div><span className="text-slate-400">Interval:</span> {m.params.interval}</div>
+                                  <div><span className="text-slate-400">Resolution:</span> {m.params.resolution}</div>
+                                  <div><span className="text-slate-400">Sc:</span> {m.params.storageCoefficient}</div>
+                                  <div><span className="text-slate-400">Units:</span> {m.params.volumeUnit}</div>
+                                  <div className="mt-1.5 text-slate-400 text-[10px]">Created {new Date(m.createdAt).toLocaleDateString()}</div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

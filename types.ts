@@ -57,3 +57,52 @@ export interface ChartPoint {
   value: number;
   isInterpolated: boolean;
 }
+
+export interface StorageAnalysisParams {
+  startDate: string;
+  endDate: string;
+  resolution: number;
+  storageCoefficient: number;
+  interval: '3months' | '6months' | '1year';
+  volumeUnit: string;
+  title: string;
+}
+
+export interface StorageGrid {
+  minLng: number;
+  minLat: number;
+  dx: number;
+  dy: number;
+  nx: number;
+  ny: number;
+  mask: (0 | 1)[];
+}
+
+export interface StorageFrame {
+  date: string;
+  values: (number | null)[];
+}
+
+export interface StorageAnalysisResult {
+  version: number;
+  title: string;
+  code: string;
+  aquiferId: string;
+  aquiferName: string;
+  regionId: string;
+  params: StorageAnalysisParams;
+  grid: StorageGrid;
+  frames: StorageFrame[];
+  storageSeries: { date: string; value: number }[];
+  createdAt: string;
+}
+
+export interface StorageAnalysisMeta {
+  title: string;
+  code: string;
+  aquiferId: string;
+  aquiferName: string;
+  regionId: string;
+  params: StorageAnalysisParams;
+  createdAt: string;
+}
