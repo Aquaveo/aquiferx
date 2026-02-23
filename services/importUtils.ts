@@ -2,9 +2,15 @@ import shp from 'shpjs';
 import JSZip from 'jszip';
 import { reprojectGeoJSON, reprojectFromWKT } from './reprojection';
 
-/** Fetch with cache-busting to avoid stale browser-cached data after writes */
-export function freshFetch(url: string): Promise<Response> {
-  return fetch(`${url}${url.includes('?') ? '&' : '?'}_t=${Date.now()}`);
+/** Fetch with cache-busting to avoid stale browser-cached data after writes.
+ *  Also detects Vite SPA fallback (returns index.html for missing files) and treats as 404. */
+export async function freshFetch(url: string): Promise<Response> {
+  const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}_t=${Date.now()}`);
+  const ct = res.headers.get('content-type') || '';
+  if (res.ok && ct.includes('text/html') && !url.endsWith('.html')) {
+    return new Response(null, { status: 404, statusText: 'Not Found' });
+  }
+  return res;
 }
 
 export interface ColumnMapping {
