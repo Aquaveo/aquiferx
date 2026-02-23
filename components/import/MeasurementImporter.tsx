@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload, Calendar } from 'lucide-react';
 import { processUploadedFile, UploadedFile, saveFiles, parseDate, detectDateFormat, parseCSV, isInUS } from '../../services/importUtils';
-import { fetchUSGSMeasurements, validateUSGSMeasurements, USGSDataQualityReport, USGSMeasurement, USGSDataSpan, computeDataSpan, filterByDateRange } from '../../services/usgsApi';
+import { fetchUSGSMeasurements, validateUSGSMeasurements, USGSDataQualityReport, USGSMeasurement, USGSDataSpan, computeDataSpan, filterByDateRange, getUSGSApiKey, setUSGSApiKey } from '../../services/usgsApi';
 import ColumnMapperModal from './ColumnMapperModal';
 import ConfirmDialog from './ConfirmDialog';
 import { DataType } from '../../types';
@@ -49,8 +49,13 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   const [aquiferList, setAquiferList] = useState<{ id: string; name: string }[]>([]);
   const [wellAquiferMap, setWellAquiferMap] = useState<Record<string, string>>({});
 
+  // USGS scope
+  const [usgsScope, setUsgsScope] = useState<'region' | 'aquifer'>('region');
+  const [usgsScopeAquiferId, setUsgsScopeAquiferId] = useState('');
+  const [apiKey, setApiKey] = useState(getUSGSApiKey());
+
   // USGS download
-  const [usgsMode, setUsgsMode] = useState<USGSMode>('fresh');
+  const [usgsMode, setUsgsMode] = useState<USGSMode>('quick-refresh');
   const [usgsIsLoading, setUsgsIsLoading] = useState(false);
   const [usgsProgress, setUsgsProgress] = useState({ completed: 0, total: 0, done: false });
   const [qualityReport, setQualityReport] = useState<USGSDataQualityReport | null>(null);
@@ -205,7 +210,9 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
       if (!wellRes.ok) throw new Error('No wells found. Import wells first.');
       const wellText = await wellRes.text();
       const { rows: wellRows } = parseCSV(wellText);
-      const wellIds = wellRows.map(r => r.well_id).filter(Boolean);
+      const wellIds = wellRows
+        .filter(r => usgsScope === 'aquifer' ? r.aquifer_id === usgsScopeAquiferId : true)
+        .map(r => r.well_id).filter(Boolean);
 
       if (wellIds.length === 0) throw new Error('No well IDs found in wells.csv');
 
@@ -248,7 +255,8 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
       // full-refresh: no filtering — all records go to merge at save time
       // fresh: no filtering
 
-      buildUSGSFile(filtered, usgsMode === 'fresh' ? 'USGS Measurements' : `USGS ${usgsMode === 'quick-refresh' ? 'Quick' : 'Full'} Refresh`);
+      const label = !hasExistingData || usgsMode === 'fresh' ? 'USGS Measurements' : `USGS ${usgsMode === 'quick-refresh' ? 'Quick' : 'Full'} Refresh`;
+      buildUSGSFile(filtered, label);
       setSelectedTypes(['wte']);
       setIsMultiType(false);
       setUsgsProgress({ completed: usgsSiteIds.length, total: usgsSiteIds.length, done: true });
@@ -585,13 +593,13 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           </div>
         )}
 
-        {/* Import mode — show for upload, and for USGS fresh mode */}
-        {hasExistingData && (dataSource === 'upload' || (dataSource === 'usgs' && usgsMode === 'fresh')) && (
+        {/* Import mode — show for upload and USGS when existing data */}
+        {hasExistingData && (dataSource === 'upload' || dataSource === 'usgs') && (
           <div className="mb-4">
             <label className="block text-sm font-medium text-slate-700 mb-2">Import Mode</label>
             <div className="flex gap-2">
               <button
-                onClick={() => setImportMode('append')}
+                onClick={() => { setImportMode('append'); if (dataSource === 'usgs') setUsgsMode('quick-refresh'); }}
                 className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
                   importMode === 'append' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                 }`}
@@ -599,7 +607,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
                 Append
               </button>
               <button
-                onClick={() => setImportMode('replace')}
+                onClick={() => { setImportMode('replace'); if (dataSource === 'usgs') setUsgsMode('fresh'); }}
                 className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
                   importMode === 'replace' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                 }`}
@@ -670,36 +678,84 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
             <p className="text-sm text-slate-500 mb-3">
               Download water level measurements from USGS for wells with USGS site IDs. Depth values will be converted to water table elevation using GSE.
             </p>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Download Mode</label>
-            <div className="space-y-2 mb-4">
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input type="radio" name="usgs-mode" checked={usgsMode === 'fresh'}
-                  onChange={() => setUsgsMode('fresh')} className="text-blue-600 mt-0.5" />
-                <div>
-                  <span className="text-sm text-slate-700 font-medium">Fresh Download</span>
-                  <p className="text-xs text-slate-500">Fetch all measurements. Choose append or replace.</p>
+            {/* Scope selector — only when multiple aquifers */}
+            {aquiferList.length > 1 && (
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Download Scope</label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="usgs-meas-scope" checked={usgsScope === 'region'}
+                      onChange={() => { setUsgsScope('region'); setUsgsScopeAquiferId(''); }}
+                      className="text-blue-600" />
+                    <span className="text-sm text-slate-700">All wells in region</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="usgs-meas-scope" checked={usgsScope === 'aquifer'}
+                      onChange={() => setUsgsScope('aquifer')}
+                      className="text-blue-600" />
+                    <span className="text-sm text-slate-700">Wells in selected aquifer</span>
+                  </label>
+                  {usgsScope === 'aquifer' && (
+                    <select value={usgsScopeAquiferId} onChange={e => setUsgsScopeAquiferId(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm ml-6">
+                      <option value="">-- Select Aquifer --</option>
+                      {aquiferList.map(a => (
+                        <option key={a.id} value={a.id}>{a.name || a.id}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
+              </div>
+            )}
+            {hasExistingData && importMode === 'append' && (
+              <>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Refresh Mode</label>
+              <div className="space-y-2 mb-4">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="radio" name="usgs-mode" checked={usgsMode === 'quick-refresh'}
+                    onChange={() => setUsgsMode('quick-refresh')} className="text-blue-600 mt-0.5" />
+                  <div>
+                    <span className="text-sm text-slate-700 font-medium">Quick Refresh</span>
+                    <p className="text-xs text-slate-500">Fetch all, keep only records newer than latest existing date.</p>
+                  </div>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="radio" name="usgs-mode" checked={usgsMode === 'full-refresh'}
+                    onChange={() => setUsgsMode('full-refresh')} className="text-blue-600 mt-0.5" />
+                  <div>
+                    <span className="text-sm text-slate-700 font-medium">Full Refresh</span>
+                    <p className="text-xs text-slate-500">Fetch all, merge/deduplicate with existing data. Catches backfills.</p>
+                  </div>
+                </label>
+              </div>
+              </>
+            )}
+            {/* API key */}
+            <div className="mb-3">
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                API Key {!apiKey && <span className="text-amber-600 font-normal">(required for bulk downloads)</span>}
               </label>
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input type="radio" name="usgs-mode" checked={usgsMode === 'quick-refresh'}
-                  onChange={() => setUsgsMode('quick-refresh')} className="text-blue-600 mt-0.5" />
-                <div>
-                  <span className="text-sm text-slate-700 font-medium">Quick Refresh</span>
-                  <p className="text-xs text-slate-500">Fetch all, keep only records newer than latest existing date. Always appends.</p>
-                </div>
-              </label>
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input type="radio" name="usgs-mode" checked={usgsMode === 'full-refresh'}
-                  onChange={() => setUsgsMode('full-refresh')} className="text-blue-600 mt-0.5" />
-                <div>
-                  <span className="text-sm text-slate-700 font-medium">Full Refresh</span>
-                  <p className="text-xs text-slate-500">Fetch all, merge/deduplicate with existing data. Catches backfills. Always appends.</p>
-                </div>
-              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  onBlur={() => setUSGSApiKey(apiKey)}
+                  placeholder="Paste your api.data.gov key"
+                  className="flex-1 px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-mono"
+                />
+              </div>
+              {!apiKey && (
+                <p className="text-xs text-slate-400 mt-1">
+                  Without a key: 30 req/hour. With a key: 1,000 req/hour.{' '}
+                  <a href="https://api.waterdata.usgs.gov/signup/" target="_blank" rel="noopener noreferrer"
+                    className="text-blue-600 underline hover:text-blue-700">Get a free key</a>
+                </p>
+              )}
             </div>
             <button
               onClick={handleUSGSDownload}
-              disabled={usgsIsLoading}
+              disabled={usgsIsLoading || (usgsScope === 'aquifer' && !usgsScopeAquiferId)}
               className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {usgsIsLoading ? (

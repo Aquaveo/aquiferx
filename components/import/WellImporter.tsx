@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload, RefreshCw } from 'lucide-react';
 import { processUploadedFile, UploadedFile, saveFiles, deleteFile, isInUS, assignWellToAquifer, parseCSV } from '../../services/importUtils';
-import { fetchUSGSWells } from '../../services/usgsApi';
+import { fetchUSGSWells, getUSGSApiKey, setUSGSApiKey } from '../../services/usgsApi';
 import ColumnMapperModal from './ColumnMapperModal';
 import ConfirmDialog from './ConfirmDialog';
 
@@ -52,6 +52,14 @@ const WellImporter: React.FC<WellImporterProps> = ({
   const [usgsProgress, setUsgsProgress] = useState({ count: 0, done: false });
   const [usgsIsLoading, setUsgsIsLoading] = useState(false);
 
+  // USGS scope
+  const [usgsScope, setUsgsScope] = useState<'region' | 'aquifer'>('region');
+  const [usgsScopeAquiferId, setUsgsScopeAquiferId] = useState('');
+  const [apiKey, setApiKey] = useState(getUSGSApiKey());
+
+  // Per-aquifer well counts for scope-aware import mode
+  const [wellCountsByAquifer, setWellCountsByAquifer] = useState<Record<string, number>>({});
+
   // USGS well refresh
   const [existingUsgsIds, setExistingUsgsIds] = useState<Set<string>>(new Set());
   const [hasExistingUsgsWells, setHasExistingUsgsWells] = useState(false);
@@ -77,6 +85,12 @@ const WellImporter: React.FC<WellImporterProps> = ({
           );
           setExistingUsgsIds(usgsIds);
           setHasExistingUsgsWells(usgsIds.size > 0);
+          // Build per-aquifer well counts
+          const counts: Record<string, number> = {};
+          for (const r of rows) {
+            if (r.aquifer_id) counts[r.aquifer_id] = (counts[r.aquifer_id] || 0) + 1;
+          }
+          setWellCountsByAquifer(counts);
         }
       } catch {}
     })();
@@ -105,6 +119,11 @@ const WellImporter: React.FC<WellImporterProps> = ({
       } catch {}
     })();
   }, [regionId, singleUnit]);
+
+  // Effective well count based on scope (for import mode visibility)
+  const effectiveExistingCount = dataSource === 'usgs' && usgsScope === 'aquifer' && usgsScopeAquiferId
+    ? (wellCountsByAquifer[usgsScopeAquiferId] || 0)
+    : existingWellCount;
 
   const fieldDefs = [
     { key: 'well_id', label: 'Well ID', required: true },
@@ -136,15 +155,44 @@ const WellImporter: React.FC<WellImporterProps> = ({
     setFile({ ...file, mapping: { ...file.mapping, [key]: value } });
   };
 
+  // Compute bounding box from aquifer geojson features
+  const computeGeojsonBounds = (geojson: any, aquiferId?: string): [number, number, number, number] | null => {
+    const features = geojson.type === 'FeatureCollection' ? geojson.features : [geojson];
+    const targets = aquiferId
+      ? features.filter((f: any) => String(f.properties?.aquifer_id) === aquiferId)
+      : features;
+    if (targets.length === 0) return null;
+    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+    const walk = (coords: any) => {
+      if (typeof coords[0] === 'number') {
+        minLng = Math.min(minLng, coords[0]); maxLng = Math.max(maxLng, coords[0]);
+        minLat = Math.min(minLat, coords[1]); maxLat = Math.max(maxLat, coords[1]);
+      } else {
+        for (const c of coords) walk(c);
+      }
+    };
+    for (const f of targets) walk(f.geometry.coordinates);
+    return [minLat, minLng, maxLat, maxLng];
+  };
+
   // USGS well download
   const handleUSGSDownload = async () => {
     setUsgsIsLoading(true);
     setError('');
     setUsgsProgress({ count: 0, done: false });
     try {
+      // Compute bbox based on scope
+      let bounds: [number, number, number, number] | null = null;
+      if (aquifersGeojson) {
+        bounds = usgsScope === 'aquifer'
+          ? computeGeojsonBounds(aquifersGeojson, usgsScopeAquiferId)
+          : computeGeojsonBounds(aquifersGeojson);
+      }
+      if (!bounds) bounds = regionBounds;
+
       // Convert bounds to USGS bbox format: [minLng, minLat, maxLng, maxLat]
       const bbox: [number, number, number, number] = [
-        regionBounds[1], regionBounds[0], regionBounds[3], regionBounds[2]
+        bounds[1], bounds[0], bounds[3], bounds[2]
       ];
       const wells = await fetchUSGSWells(bbox, (count) => {
         setUsgsProgress({ count, done: false });
@@ -154,9 +202,22 @@ const WellImporter: React.FC<WellImporterProps> = ({
       let wellsWithAquifer: { well: typeof wells[0]; aquiferId: string }[];
       if (aquifersGeojson) {
         wellsWithAquifer = [];
-        for (const w of wells) {
-          const aqId = assignWellToAquifer(w.lat, w.lng, aquifersGeojson);
-          if (aqId !== null) wellsWithAquifer.push({ well: w, aquiferId: aqId });
+        if (usgsScope === 'aquifer') {
+          // Only match to the selected aquifer
+          const features = aquifersGeojson.type === 'FeatureCollection' ? aquifersGeojson.features : [aquifersGeojson];
+          const targetFeature = features.find((f: any) => String(f.properties?.aquifer_id) === usgsScopeAquiferId);
+          if (targetFeature) {
+            const scopedGj = { type: 'FeatureCollection', features: [targetFeature] };
+            for (const w of wells) {
+              const aqId = assignWellToAquifer(w.lat, w.lng, scopedGj);
+              if (aqId !== null) wellsWithAquifer.push({ well: w, aquiferId: aqId });
+            }
+          }
+        } else {
+          for (const w of wells) {
+            const aqId = assignWellToAquifer(w.lat, w.lng, aquifersGeojson);
+            if (aqId !== null) wellsWithAquifer.push({ well: w, aquiferId: aqId });
+          }
         }
       } else {
         wellsWithAquifer = wells.map(w => ({ well: w, aquiferId: singleUnit ? '0' : '' }));
@@ -194,8 +255,17 @@ const WellImporter: React.FC<WellImporterProps> = ({
     setError('');
     setRefreshSummary(null);
     try {
+      // Compute bbox based on scope
+      let bounds: [number, number, number, number] | null = null;
+      if (aquifersGeojson) {
+        bounds = usgsScope === 'aquifer'
+          ? computeGeojsonBounds(aquifersGeojson, usgsScopeAquiferId)
+          : computeGeojsonBounds(aquifersGeojson);
+      }
+      if (!bounds) bounds = regionBounds;
+
       const bbox: [number, number, number, number] = [
-        regionBounds[1], regionBounds[0], regionBounds[3], regionBounds[2]
+        bounds[1], bounds[0], bounds[3], bounds[2]
       ];
       const wells = await fetchUSGSWells(bbox, (count) => {
         setUsgsProgress({ count, done: false });
@@ -205,9 +275,21 @@ const WellImporter: React.FC<WellImporterProps> = ({
       let wellsWithAquifer: { well: typeof wells[0]; aquiferId: string }[];
       if (aquifersGeojson) {
         wellsWithAquifer = [];
-        for (const w of wells) {
-          const aqId = assignWellToAquifer(w.lat, w.lng, aquifersGeojson);
-          if (aqId !== null) wellsWithAquifer.push({ well: w, aquiferId: aqId });
+        if (usgsScope === 'aquifer') {
+          const features = aquifersGeojson.type === 'FeatureCollection' ? aquifersGeojson.features : [aquifersGeojson];
+          const targetFeature = features.find((f: any) => String(f.properties?.aquifer_id) === usgsScopeAquiferId);
+          if (targetFeature) {
+            const scopedGj = { type: 'FeatureCollection', features: [targetFeature] };
+            for (const w of wells) {
+              const aqId = assignWellToAquifer(w.lat, w.lng, scopedGj);
+              if (aqId !== null) wellsWithAquifer.push({ well: w, aquiferId: aqId });
+            }
+          }
+        } else {
+          for (const w of wells) {
+            const aqId = assignWellToAquifer(w.lat, w.lng, aquifersGeojson);
+            if (aqId !== null) wellsWithAquifer.push({ well: w, aquiferId: aqId });
+          }
         }
       } else {
         wellsWithAquifer = wells.map(w => ({ well: w, aquiferId: singleUnit ? '0' : '' }));
@@ -367,15 +449,45 @@ const WellImporter: React.FC<WellImporterProps> = ({
         aquifer_id: resolveAquiferId(w)
       })).filter(w => w.well_id && w.lat && w.long);
 
-      if (importMode === 'append' && existingWellCount > 0) {
+      const isAquiferScoped = dataSource === 'usgs' && usgsScope === 'aquifer' && usgsScopeAquiferId;
+      const formatRow = (w: Record<string, string>) =>
+        `${w.well_id},"${w.well_name || ''}",${w.lat},${w.long},${w.gse || ''},${w.aquifer_id || ''}`;
+
+      if (isAquiferScoped) {
+        // Aquifer-scoped: always merge with other aquifers' wells
+        let existingRows: Record<string, string>[] = [];
+        try {
+          const res = await fetch(`/data/${regionId}/wells.csv`);
+          if (res.ok) {
+            existingRows = parseCSV((await res.text())).rows;
+          }
+        } catch {}
+
+        let keptExisting: Record<string, string>[];
+        if (importMode === 'replace') {
+          // Remove wells from selected aquifer, keep everything else
+          keptExisting = existingRows.filter(r => r.aquifer_id !== usgsScopeAquiferId);
+        } else {
+          // Append: keep all existing, skip duplicates
+          keptExisting = existingRows;
+        }
+
+        const existingIds = new Set(keptExisting.map(r => r.well_id));
+        const toAdd = processedWells.filter(w => !existingIds.has(w.well_id));
+
+        const allWells = [
+          ...keptExisting.map(r => formatRow(r)),
+          ...toAdd.map(w => formatRow(w))
+        ];
+        const csv = 'well_id,well_name,lat,long,gse,aquifer_id\n' + allWells.join('\n');
+        await saveFiles([{ path: `${regionId}/wells.csv`, content: csv }]);
+      } else if (importMode === 'append' && existingWellCount > 0) {
         // Load existing wells, skip duplicates
         let existingRows: Record<string, string>[] = [];
         try {
           const res = await fetch(`/data/${regionId}/wells.csv`);
           if (res.ok) {
-            const text = await res.text();
-            const parsed = parseCSV(text);
-            existingRows = parsed.rows;
+            existingRows = parseCSV((await res.text())).rows;
           }
         } catch {}
 
@@ -384,13 +496,13 @@ const WellImporter: React.FC<WellImporterProps> = ({
 
         // Merge: keep existing + add new
         const allWells = [
-          ...existingRows.map(r => `${r.well_id},"${r.well_name || ''}",${r.lat},${r.long},${r.gse || ''},${r.aquifer_id || ''}`),
-          ...toAdd.map(w => `${w.well_id},"${w.well_name}",${w.lat},${w.long},${w.gse},${w.aquifer_id}`)
+          ...existingRows.map(r => formatRow(r)),
+          ...toAdd.map(w => formatRow(w))
         ];
         const csv = 'well_id,well_name,lat,long,gse,aquifer_id\n' + allWells.join('\n');
         await saveFiles([{ path: `${regionId}/wells.csv`, content: csv }]);
       } else {
-        // Replace: delete measurements then write
+        // Region-wide replace: delete measurements then write
         if (importMode === 'replace' && existingWellCount > 0) {
           try {
             const metaRes = await fetch(`/data/${regionId}/region.json`);
@@ -404,7 +516,7 @@ const WellImporter: React.FC<WellImporterProps> = ({
         }
 
         const csv = 'well_id,well_name,lat,long,gse,aquifer_id\n' +
-          processedWells.map(w => `${w.well_id},"${w.well_name}",${w.lat},${w.long},${w.gse},${w.aquifer_id}`).join('\n');
+          processedWells.map(w => formatRow(w)).join('\n');
         await saveFiles([{ path: `${regionId}/wells.csv`, content: csv }]);
       }
       onComplete();
@@ -415,7 +527,7 @@ const WellImporter: React.FC<WellImporterProps> = ({
   };
 
   const handleSave = () => {
-    if (importMode === 'replace' && existingWellCount > 0) {
+    if (importMode === 'replace' && effectiveExistingCount > 0) {
       setShowReplaceConfirm(true);
     } else {
       doSave();
@@ -463,7 +575,7 @@ const WellImporter: React.FC<WellImporterProps> = ({
         )}
 
         {/* Import mode */}
-        {existingWellCount > 0 && (
+        {effectiveExistingCount > 0 && (
           <div className="mb-4">
             <label className="block text-sm font-medium text-slate-700 mb-2">Import Mode</label>
             <div className="flex gap-2">
@@ -481,15 +593,17 @@ const WellImporter: React.FC<WellImporterProps> = ({
                   importMode === 'replace' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                 }`}
               >
-                Replace All
+                {usgsScope === 'aquifer' && usgsScopeAquiferId ? 'Replace Aquifer' : 'Replace All'}
               </button>
             </div>
             <p className="text-xs text-slate-400 mt-1">
               {importMode === 'append'
                 ? 'New wells will be added. Duplicates (by ID) are skipped.'
-                : 'All existing wells and measurements will be deleted first.'}
+                : usgsScope === 'aquifer' && usgsScopeAquiferId
+                  ? 'Existing wells in this aquifer will be replaced. Other aquifers are not affected.'
+                  : 'All existing wells and measurements will be deleted first.'}
             </p>
-            {importMode === 'replace' && (
+            {importMode === 'replace' && !(usgsScope === 'aquifer' && usgsScopeAquiferId) && (
               <div className="flex items-start gap-2 mt-2 p-2 bg-red-50 border border-red-200 rounded-lg">
                 <AlertTriangle size={14} className="text-red-500 mt-0.5 shrink-0" />
                 <p className="text-xs text-red-700">This will also delete all measurement data for this region.</p>
@@ -557,10 +671,62 @@ const WellImporter: React.FC<WellImporterProps> = ({
             <p className="text-sm text-slate-500 mb-3">
               Download groundwater monitoring wells from USGS within this region's bounding box.
             </p>
+            {/* Scope selector — only when multiple aquifers */}
+            {aquiferList.length > 1 && (
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Download Scope</label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="usgs-scope" checked={usgsScope === 'region'}
+                      onChange={() => { setUsgsScope('region'); setUsgsScopeAquiferId(''); }}
+                      className="text-blue-600" />
+                    <span className="text-sm text-slate-700">Entire Region</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="usgs-scope" checked={usgsScope === 'aquifer'}
+                      onChange={() => setUsgsScope('aquifer')}
+                      className="text-blue-600" />
+                    <span className="text-sm text-slate-700">Selected Aquifer</span>
+                  </label>
+                  {usgsScope === 'aquifer' && (
+                    <select value={usgsScopeAquiferId} onChange={e => setUsgsScopeAquiferId(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm ml-6">
+                      <option value="">-- Select Aquifer --</option>
+                      {aquiferList.map(a => (
+                        <option key={a.id} value={a.id}>{a.name || a.id}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+            )}
+            {/* API key */}
+            <div className="mb-3">
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                API Key {!apiKey && <span className="text-amber-600 font-normal">(required for bulk downloads)</span>}
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  onBlur={() => setUSGSApiKey(apiKey)}
+                  placeholder="Paste your api.data.gov key"
+                  className="flex-1 px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-mono"
+                />
+              </div>
+              {!apiKey && (
+                <p className="text-xs text-slate-400 mt-1">
+                  Without a key: 30 req/hour. With a key: 1,000 req/hour.{' '}
+                  <a href="https://api.waterdata.usgs.gov/signup/" target="_blank" rel="noopener noreferrer"
+                    className="text-blue-600 underline hover:text-blue-700">Get a free key</a>
+                </p>
+              )}
+            </div>
             <div className="flex gap-2">
               <button
                 onClick={handleUSGSDownload}
-                disabled={usgsIsLoading || usgsRefreshLoading}
+                disabled={usgsIsLoading || usgsRefreshLoading || (usgsScope === 'aquifer' && !usgsScopeAquiferId)}
                 className={`${hasExistingUsgsWells ? 'flex-1' : 'w-full'} px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2`}
               >
                 {usgsIsLoading ? (
@@ -577,7 +743,7 @@ const WellImporter: React.FC<WellImporterProps> = ({
               {hasExistingUsgsWells && (
                 <button
                   onClick={handleUSGSRefresh}
-                  disabled={usgsIsLoading || usgsRefreshLoading}
+                  disabled={usgsIsLoading || usgsRefreshLoading || (usgsScope === 'aquifer' && !usgsScopeAquiferId)}
                   className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {usgsRefreshLoading ? (
@@ -672,9 +838,11 @@ const WellImporter: React.FC<WellImporterProps> = ({
 
       {showReplaceConfirm && (
         <ConfirmDialog
-          title="Replace All Wells?"
-          message={`This will delete all ${existingWellCount} existing well(s) and all measurement data. This cannot be undone.`}
-          confirmLabel="Replace All"
+          title={usgsScope === 'aquifer' && usgsScopeAquiferId ? 'Replace Aquifer Wells?' : 'Replace All Wells?'}
+          message={usgsScope === 'aquifer' && usgsScopeAquiferId
+            ? `This will replace ${effectiveExistingCount} well(s) in the selected aquifer. Wells in other aquifers are not affected.`
+            : `This will delete all ${existingWellCount} existing well(s) and all measurement data. This cannot be undone.`}
+          confirmLabel={usgsScope === 'aquifer' && usgsScopeAquiferId ? 'Replace Aquifer' : 'Replace All'}
           variant="danger"
           onConfirm={() => { setShowReplaceConfirm(false); doSave(); }}
           onCancel={() => setShowReplaceConfirm(false)}

@@ -1,6 +1,11 @@
 /**
  * USGS Water Data API integration for wells and measurements.
  * Docs: https://api.waterdata.usgs.gov/ogcapi/v0/
+ *
+ * Rate limits (via api.data.gov):
+ *   Without API key: 30 requests/hour, 50/day
+ *   With API key:    1,000 requests/hour
+ * Get a free key at: https://api.waterdata.usgs.gov/signup/
  */
 
 export interface USGSWell {
@@ -25,13 +30,40 @@ export interface USGSDataQualityReport {
 }
 
 const BASE_URL = 'https://api.waterdata.usgs.gov/ogcapi/v0';
+const LOCALSTORAGE_KEY = 'usgs_api_key';
+
+/** Get stored USGS API key from localStorage */
+export function getUSGSApiKey(): string {
+  try { return localStorage.getItem(LOCALSTORAGE_KEY) || ''; } catch { return ''; }
+}
+
+/** Save USGS API key to localStorage */
+export function setUSGSApiKey(key: string): void {
+  try {
+    if (key.trim()) {
+      localStorage.setItem(LOCALSTORAGE_KEY, key.trim());
+    } else {
+      localStorage.removeItem(LOCALSTORAGE_KEY);
+    }
+  } catch {}
+}
+
+/** Append API key to URL if available */
+function withApiKey(url: string): string {
+  const key = getUSGSApiKey();
+  if (!key) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}api_key=${encodeURIComponent(key)}`;
+}
 
 async function fetchWithRetry(url: string, maxRetries = 3): Promise<Response> {
+  const fullUrl = withApiKey(url);
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const res = await fetch(url);
+    const res = await fetch(fullUrl);
     if (res.ok) return res;
     if (res.status === 429) {
-      const wait = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+      const wait = Math.pow(2, attempt) * 2000 + Math.random() * 1000;
+      console.warn(`429 rate limited (attempt ${attempt + 1}/${maxRetries}), waiting ${Math.round(wait / 1000)}s...`);
       await new Promise(r => setTimeout(r, wait));
       continue;
     }
@@ -41,7 +73,32 @@ async function fetchWithRetry(url: string, maxRetries = 3): Promise<Response> {
     }
     throw new Error(`HTTP ${res.status}: ${await res.text()}`);
   }
-  throw new Error('Max retries exceeded');
+  throw new Error('Max retries exceeded — you may be rate-limited. Get a free API key at https://api.waterdata.usgs.gov/signup/');
+}
+
+/** POST with CQL2 JSON body + retry logic */
+async function postCQL2WithRetry(url: string, body: object, maxRetries = 3): Promise<Response> {
+  const fullUrl = withApiKey(url);
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const res = await fetch(fullUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/query-cql-json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return res;
+    if (res.status === 429) {
+      const wait = Math.pow(2, attempt) * 2000 + Math.random() * 1000;
+      console.warn(`429 rate limited (attempt ${attempt + 1}/${maxRetries}), waiting ${Math.round(wait / 1000)}s...`);
+      await new Promise(r => setTimeout(r, wait));
+      continue;
+    }
+    if (res.status >= 500) {
+      await new Promise(r => setTimeout(r, 2000));
+      continue;
+    }
+    throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+  }
+  throw new Error('Max retries exceeded — you may be rate-limited. Get a free API key at https://api.waterdata.usgs.gov/signup/');
 }
 
 /**
@@ -68,12 +125,14 @@ export async function fetchUSGSWells(
       const coords = f.geometry?.coordinates;
       if (!coords || coords.length < 2) continue;
 
+      // USGS OGC API property names (with fallbacks for older schemas)
+      const altFt = parseFloat(String(props.altitude ?? props.altitude_of_gage_or_measuring_point ?? 0)) || 0;
       wells.push({
-        siteId: props.monitoring_location_identifier || props.site_no || '',
+        siteId: props.id || props.monitoring_location_identifier || '',
         siteName: props.monitoring_location_name || '',
         lat: coords[1],
         lng: coords[0],
-        gse: parseFloat(props.altitude_of_gage_or_measuring_point || '0') || 0,
+        gse: altFt ? altFt * 0.3048 : 0, // USGS altitude is in feet; convert to meters
       });
     }
 
@@ -271,48 +330,80 @@ export function filterByDateRange(
   });
 }
 
+/**
+ * Fetch water level measurements using batched CQL2 POST queries.
+ * Batches site IDs into groups to minimize request count.
+ * e.g. 7,664 wells at 1,000/batch → 8 requests instead of 7,664.
+ */
 export async function fetchUSGSMeasurements(
   wellSiteIds: string[],
   onProgress?: (completed: number, total: number) => void
 ): Promise<USGSMeasurement[]> {
+  if (wellSiteIds.length === 0) return [];
+
   const allMeasurements: USGSMeasurement[] = [];
-  const concurrency = 3;
-  let completed = 0;
+  const PAGE_LIMIT = 10000; // max records per response page
 
-  const queue = [...wellSiteIds];
+  // Start with large batches; shrink if the server rejects them
+  let batchSize = 1000;
 
-  const fetchOne = async () => {
-    while (queue.length > 0) {
-      const siteId = queue.shift()!;
+  let i = 0;
+  while (i < wellSiteIds.length) {
+    const batch = wellSiteIds.slice(i, i + batchSize);
+    const cqlFilter = {
+      op: 'and' as const,
+      args: [
+        { op: 'in' as const, args: [{ property: 'monitoring_location_id' }, batch] },
+        { op: '=' as const, args: [{ property: 'parameter_code' }, '72019'] },
+      ],
+    };
+
+    // Paginate through results for this batch
+    let offset = 0;
+    let hasMore = true;
+    let batchFailed = false;
+
+    while (hasMore) {
       try {
-        // Try field measurements collection
-        const url = `${BASE_URL}/collections/field-measurements/items?monitoring_location_identifier=${encodeURIComponent(siteId)}&parameter_code=72019&limit=10000&f=json`;
-        const res = await fetchWithRetry(url);
+        const url = `${BASE_URL}/collections/field-measurements/items?limit=${PAGE_LIMIT}&offset=${offset}&f=json`;
+        const res = await postCQL2WithRetry(url, cqlFilter);
         const data = await res.json();
+        const features = data.features || [];
 
-        for (const f of (data.features || [])) {
+        for (const f of features) {
           const props = f.properties || {};
-          const date = props.activity_start_date || '';
-          const value = parseFloat(props.result_measure_value || '');
+          const siteId = props.monitoring_location_id || props.id || '';
+          const rawTime = props.time || props.activity_start_date || '';
+          const date = rawTime.includes('T') ? rawTime.split('T')[0] : rawTime;
+          const value = parseFloat(String(props.value ?? props.result_measure_value ?? ''));
 
-          if (date && !isNaN(value)) {
-            allMeasurements.push({
-              siteId,
-              date,
-              value,
-            });
+          if (siteId && date && !isNaN(value)) {
+            allMeasurements.push({ siteId, date, value });
           }
         }
-      } catch (err) {
-        console.warn(`Failed to fetch measurements for ${siteId}:`, err);
+
+        hasMore = features.length >= PAGE_LIMIT;
+        offset += PAGE_LIMIT;
+      } catch (err: any) {
+        // If batch too large (400/413), halve the batch size and retry
+        if (batchSize > 50 && /4(00|13)/.test(String(err?.message || ''))) {
+          batchSize = Math.max(50, Math.floor(batchSize / 2));
+          console.warn(`Batch too large, reducing to ${batchSize} sites per request`);
+          batchFailed = true;
+          hasMore = false;
+        } else {
+          console.warn(`Failed to fetch measurement batch (sites ${i + 1}–${i + batch.length}):`, err);
+          hasMore = false;
+        }
       }
-
-      completed++;
-      onProgress?.(completed, wellSiteIds.length);
     }
-  };
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, wellSiteIds.length) }, () => fetchOne()));
+    // Only advance if batch succeeded; otherwise retry with smaller batch
+    if (!batchFailed) {
+      i += batch.length;
+      onProgress?.(Math.min(i, wellSiteIds.length), wellSiteIds.length);
+    }
+  }
 
   return allMeasurements;
 }
