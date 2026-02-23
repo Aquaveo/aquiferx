@@ -1,0 +1,13 @@
+{
+  "id": "great-salt-lake-basin",
+  "name": "Great Salt Lake Basin",
+  "lengthUnit": "ft",
+  "singleUnit": true,
+  "dataTypes": [
+    {
+      "code": "wte",
+      "name": "Water Table Elevation",
+      "unit": "ft"
+    }
+  ]
+}
