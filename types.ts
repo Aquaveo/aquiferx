@@ -68,6 +68,8 @@ export interface StorageAnalysisParams {
   title: string;
   minObservations: number;
   minTimeSpanYears: number;
+  smoothingMethod: 'pchip' | 'moving-average';
+  smoothingMonths: number;
 }
 
 export interface StorageGrid {

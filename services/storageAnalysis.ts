@@ -147,6 +147,84 @@ export async function runStorageAnalysis(
 
   console.log(`[StorageAnalysis] ${wellInterp.size}/${wellIds.length} wells qualified (minObs=${params.minObservations}, minSpan=${params.minTimeSpanYears}yr)`);
 
+  // Step 3b: Moving average smoothing (when selected)
+  if (params.smoothingMethod === 'moving-average') {
+    onProgress('Applying moving average smoothing...', 30);
+    await yieldToUI();
+
+    // Generate monthly timestamps spanning the full analysis range
+    const monthlyTimestamps: number[] = [];
+    const maStart = new Date(startDate);
+    const maEnd = new Date(endDate);
+    const maCursor = new Date(maStart);
+    while (maCursor <= maEnd) {
+      monthlyTimestamps.push(maCursor.getTime());
+      maCursor.setMonth(maCursor.getMonth() + 1);
+    }
+
+    const halfWindow = params.smoothingMonths / 2;
+    const MS_PER_MONTH = 30.4375 * 24 * 60 * 60 * 1000;
+
+    for (const [wellId, entry] of wellInterp) {
+      const meas = byWell.get(wellId)!;
+      const sorted = [...meas]
+        .filter(m => !isNaN(new Date(m.date).getTime()))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+      const xValues = sorted.map(m => new Date(m.date).getTime());
+      const yValues = sorted.map(m => m.value);
+      const minT = xValues[0];
+      const maxT = xValues[xValues.length - 1];
+
+      // PCHIP interpolate to monthly timestamps within the well's data range
+      const validMonthlyTs: number[] = [];
+      const validMonthlyIdx: number[] = [];
+      for (let i = 0; i < monthlyTimestamps.length; i++) {
+        if (monthlyTimestamps[i] >= minT && monthlyTimestamps[i] <= maxT) {
+          validMonthlyTs.push(monthlyTimestamps[i]);
+          validMonthlyIdx.push(i);
+        }
+      }
+
+      if (validMonthlyTs.length < 2) continue;
+
+      const monthlyValues = interpolatePCHIP(xValues, yValues, validMonthlyTs);
+
+      // Apply centered moving average over the monthly series
+      const smoothed: number[] = new Array(monthlyValues.length);
+      for (let i = 0; i < monthlyValues.length; i++) {
+        const centerT = validMonthlyTs[i];
+        const windowMinT = centerT - halfWindow * MS_PER_MONTH;
+        const windowMaxT = centerT + halfWindow * MS_PER_MONTH;
+        let sum = 0, count = 0;
+        for (let j = 0; j < monthlyValues.length; j++) {
+          if (validMonthlyTs[j] >= windowMinT && validMonthlyTs[j] <= windowMaxT) {
+            sum += monthlyValues[j];
+            count++;
+          }
+        }
+        smoothed[i] = sum / count;
+      }
+
+      // Sample the smoothed series at the original interval dates
+      const newValues: (number | null)[] = intervalTimestamps.map(t => {
+        if (t < minT || t > maxT) return null;
+        // Find nearest monthly timestamp
+        let bestIdx = -1, bestDist = Infinity;
+        for (let i = 0; i < validMonthlyTs.length; i++) {
+          const dist = Math.abs(validMonthlyTs[i] - t);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = i;
+          }
+        }
+        return bestIdx >= 0 ? smoothed[bestIdx] : null;
+      });
+
+      entry.values = newValues;
+    }
+  }
+
   // Step 4: Compute a single variogram from all wells' mean PCHIP values
   // This ensures consistent spatial correlation structure across all timesteps
   const allWellLats: number[] = [];

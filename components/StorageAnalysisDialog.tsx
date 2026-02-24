@@ -234,6 +234,8 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
   const [volumeUnit, setVolumeUnit] = useState(region.lengthUnit === 'ft' ? 'acre-ft' : 'MCM');
   const [minObs, setMinObs] = useState(5);
   const [minSpanYears, setMinSpanYears] = useState(5);
+  const [smoothingMethod, setSmoothingMethod] = useState<'pchip' | 'moving-average'>('pchip');
+  const [smoothingMonths, setSmoothingMonths] = useState(12);
 
   // Build well ID set for fast lookup
   const wellIdSet = useMemo(() => new Set(wells.map(w => w.id)), [wells]);
@@ -335,6 +337,7 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
       startDate, endDate, resolution, storageCoefficient: storageCoeff,
       interval, volumeUnit, title,
       minObservations: minObs, minTimeSpanYears: minSpanYears,
+      smoothingMethod, smoothingMonths,
     };
 
     try {
@@ -537,6 +540,26 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
                     className="w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
                     {volumeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Interpolation Method</label>
+                  <select value={smoothingMethod} onChange={e => setSmoothingMethod(e.target.value as any)}
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+                    <option value="pchip">PCHIP</option>
+                    <option value="moving-average">Moving Average</option>
+                  </select>
+                </div>
+                <div>
+                  {smoothingMethod === 'moving-average' ? (
+                    <>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">MA Window (months)</label>
+                      <input type="number" value={smoothingMonths} min={1} max={60} step={1}
+                        onChange={e => setSmoothingMonths(Math.max(1, Math.min(60, parseInt(e.target.value) || 12)))}
+                        className="w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+                    </>
+                  ) : (
+                    <div />
+                  )}
                 </div>
                 <div className="col-span-2">
                   <label className="block text-xs font-medium text-slate-600 mb-1">Title</label>

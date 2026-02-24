@@ -125,6 +125,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
   const [isBasemapMenuOpen, setIsBasemapMenuOpen] = useState(false);
   const [minObs, setMinObs] = useState(0);
   const [showAquiferNames, setShowAquiferNames] = useState(true);
+  const [showAquiferIds, setShowAquiferIds] = useState(false);
   const [showWellIds, setShowWellIds] = useState(false);
   const [showWellNames, setShowWellNames] = useState(false);
   const [labelFontSize, setLabelFontSize] = useState(9);
@@ -295,16 +296,19 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
   // Aquifer name labels (separate from polygons so font size changes don't rebuild polygons)
   useEffect(() => {
     aquiferLabelLayerRef.current?.clearLayers();
-    if (!showAquiferNames || !selectedRegion) return;
+    if ((!showAquiferNames && !showAquiferIds) || !selectedRegion) return;
 
     aquifers.forEach(a => {
       if (selectedAquifer?.id === a.id) return;
       const [lat, lng] = a.labelPoint;
       const aFontSize = Math.round(labelFontSize * 1.2);
+      const labelText = showAquiferNames && showAquiferIds
+        ? `${a.name} (${a.id})`
+        : showAquiferNames ? a.name : a.id;
       const label = L.marker([lat, lng], {
         icon: L.divIcon({
           className: '',
-          html: `<div style="white-space:nowrap;font-size:${aFontSize}px;color:#fff;text-shadow:0 0 3px #000,0 0 6px #000;pointer-events:none;font-weight:600;text-align:center">${a.name} (${a.id})</div>`,
+          html: `<div style="white-space:nowrap;font-size:${aFontSize}px;color:#fff;text-shadow:0 0 3px #000,0 0 6px #000;pointer-events:none;font-weight:600;text-align:center">${labelText}</div>`,
           iconSize: [400, 20],
           iconAnchor: [200, 10],
         }),
@@ -312,7 +316,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
       });
       aquiferLabelLayerRef.current?.addLayer(label);
     });
-  }, [aquifers, selectedRegion, selectedAquifer, showAquiferNames, labelFontSize]);
+  }, [aquifers, selectedRegion, selectedAquifer, showAquiferNames, showAquiferIds, labelFontSize]);
 
   // Build well markers — only when wells/aquifer/filter changes, NOT on selection change
   const wellMarkerMapRef = useRef<Map<string, L.CircleMarker>>(new Map());
@@ -563,6 +567,10 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
           <label className="flex items-center gap-1 cursor-pointer">
             <input type="checkbox" checked={showAquiferNames} onChange={(e) => setShowAquiferNames(e.target.checked)} className="w-3 h-3" />
             <span className="text-xs text-slate-600">Aquifer names</span>
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" checked={showAquiferIds} onChange={(e) => setShowAquiferIds(e.target.checked)} className="w-3 h-3" />
+            <span className="text-xs text-slate-600">Aquifer IDs</span>
           </label>
           <label className="flex items-center gap-1 cursor-pointer">
             <input type="checkbox" checked={showWellIds} onChange={(e) => setShowWellIds(e.target.checked)} className="w-3 h-3" />

@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3 } from 'lucide-react';
 import { Region, Aquifer, Well, Measurement, DataType, StorageAnalysisResult, StorageAnalysisMeta } from './types';
 import { loadAllData } from './services/dataLoader';
+import { freshFetch } from './services/importUtils';
 import MapView, { MapViewHandle } from './components/MapView';
 import Sidebar from './components/Sidebar';
 import TimeSeriesChart from './components/TimeSeriesChart';
@@ -32,6 +33,7 @@ const TREND_CATEGORIES: { label: string; color: string; test: (s: number, t: Tre
 
 const INSUFFICIENT_COLOR = '#1E293B';
 const MS_PER_YEAR = 365.25 * 86400000;
+const STORAGE_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
 function computeSlope(meas: Measurement[]): number | null {
   if (meas.length < 3) return null;
@@ -75,6 +77,7 @@ const App: React.FC = () => {
   const [isDataEditorOpen, setIsDataEditorOpen] = useState(false);
   const [showGSE, setShowGSE] = useState(false);
   const [showTrendLine, setShowTrendLine] = useState(false);
+  const [showMovingAvg, setShowMovingAvg] = useState(false);
   const [trendColors, setTrendColors] = useState<Map<string, string> | null>(null);
   const [aquiferTrendColors, setAquiferTrendColors] = useState<Map<string, string> | null>(null);
   const [showTrends, setShowTrends] = useState(false);
@@ -82,6 +85,7 @@ const App: React.FC = () => {
   const [visibleRegionIds, setVisibleRegionIds] = useState<Set<string>>(new Set());
   const [storageDialogOpen, setStorageDialogOpen] = useState(false);
   const [storageResult, setStorageResult] = useState<StorageAnalysisResult | null>(null);
+  const [compareStorageResults, setCompareStorageResults] = useState<StorageAnalysisResult[]>([]);
   const [storageMeta, setStorageMeta] = useState<StorageAnalysisMeta[]>([]);
   const [loadingStorageCode, setLoadingStorageCode] = useState<string | null>(null);
   const [activeTimeSeriesTab, setActiveTimeSeriesTab] = useState<'waterLevel' | 'storageChange'>('waterLevel');
@@ -133,6 +137,7 @@ const App: React.FC = () => {
       setActiveTimeSeriesTab('waterLevel');
       setStorageFrameDate(null);
     }
+    setCompareStorageResults([]);
   }, [storageResult]);
 
   const analyzeTrends = () => {
@@ -260,6 +265,24 @@ const App: React.FC = () => {
     setStorageResult(null);
   };
 
+  const handleToggleCompareStorage = async (meta: StorageAnalysisMeta) => {
+    if (storageResult && storageResult.code === meta.code && storageResult.regionId === meta.regionId) return;
+    const existingIdx = compareStorageResults.findIndex(r => r.code === meta.code && r.regionId === meta.regionId);
+    if (existingIdx >= 0) {
+      setCompareStorageResults(prev => prev.filter((_, i) => i !== existingIdx));
+      return;
+    }
+    try {
+      const res = await fetch(`/data/${meta.regionId}/storage_${meta.code}.json`);
+      if (res.ok) {
+        const fullResult: StorageAnalysisResult = await res.json();
+        setCompareStorageResults(prev => [...prev, fullResult]);
+      }
+    } catch (e) {
+      console.error('Failed to load storage for comparison:', e);
+    }
+  };
+
   const handleDeleteStorage = async (meta: StorageAnalysisMeta) => {
     // Unload if this is the active raster
     if (storageResult?.code === meta.code) {
@@ -303,13 +326,32 @@ const App: React.FC = () => {
       : [],
   [selectedWells, measurements, selectedDataType]);
 
-  const storageChartData = useMemo(() => {
+  const allStorageResults = useMemo(() => {
     if (!storageResult) return [];
-    return storageResult.storageSeries.map(s => ({
-      date: new Date(s.date).getTime(),
-      value: s.value,
-    }));
-  }, [storageResult]);
+    return [storageResult, ...compareStorageResults];
+  }, [storageResult, compareStorageResults]);
+
+  const storageChartData = useMemo(() => {
+    if (allStorageResults.length === 0) return [];
+    const dateSet = new Set<number>();
+    for (const r of allStorageResults) {
+      for (const s of r.storageSeries) dateSet.add(new Date(s.date).getTime());
+    }
+    const dates = [...dateSet].sort((a, b) => a - b);
+    const lookups = allStorageResults.map(r => {
+      const map = new Map<number, number>();
+      for (const s of r.storageSeries) map.set(new Date(s.date).getTime(), s.value);
+      return map;
+    });
+    return dates.map(d => {
+      const row: Record<string, number> = { date: d };
+      for (let i = 0; i < lookups.length; i++) {
+        const val = lookups[i].get(d);
+        if (val !== undefined) row[`value_${i}`] = val;
+      }
+      return row;
+    });
+  }, [allStorageResults]);
 
   const handleWellClick = (well: Well, shiftKey: boolean) => {
     if (shiftKey) {
@@ -476,7 +518,7 @@ const App: React.FC = () => {
     const staticFiles = ['region.json', 'region.geojson', 'aquifers.geojson', 'wells.csv'];
     for (const name of staticFiles) {
       try {
-        const res = await fetch(`${basePath}/${name}`);
+        const res = await freshFetch(`${basePath}/${name}`);
         if (res.ok) {
           zip.file(name, await res.text());
         }
@@ -488,7 +530,7 @@ const App: React.FC = () => {
     // Dynamically include all data_*.csv files
     for (const dt of region.dataTypes) {
       try {
-        const res = await fetch(`${basePath}/data_${dt.code}.csv`);
+        const res = await freshFetch(`${basePath}/data_${dt.code}.csv`);
         if (res.ok) {
           zip.file(`data_${dt.code}.csv`, await res.text());
         }
@@ -729,9 +771,11 @@ const App: React.FC = () => {
         onDeleteAquifer={handleDeleteAquifer}
         storageMeta={storageMeta}
         activeStorageCode={storageResult?.code || null}
+        compareStorageCodes={compareStorageResults.map(r => r.code)}
         loadingStorageCode={loadingStorageCode}
         onLoadStorage={handleLoadStorage}
         onUnloadStorage={handleUnloadStorage}
+        onToggleCompareStorage={handleToggleCompareStorage}
         onDeleteStorage={handleDeleteStorage}
       />
 
@@ -981,8 +1025,12 @@ const App: React.FC = () => {
                       ) : (
                         <>
                           {!showBothTabs && <BarChart3 size={18} className="text-emerald-500" />}
-                          <h3 className="font-bold text-slate-800">Storage Change: {storageResult!.title}</h3>
-                          <span className="text-xs text-slate-400">({storageResult!.params.volumeUnit})</span>
+                          <h3 className="font-bold text-slate-800">
+                            {allStorageResults.length > 1 ? 'Storage Change Comparison' : `Storage Change: ${storageResult!.title}`}
+                          </h3>
+                          {allStorageResults.length === 1 && (
+                            <span className="text-xs text-slate-400">({storageResult!.params.volumeUnit})</span>
+                          )}
                         </>
                       )}
                     </div>
@@ -998,6 +1046,10 @@ const App: React.FC = () => {
                           <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
                             <input type="checkbox" checked={showTrendLine} onChange={(e) => setShowTrendLine(e.target.checked)} className="accent-blue-500" />
                             Trend Line
+                          </label>
+                          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                            <input type="checkbox" checked={showMovingAvg} onChange={(e) => setShowMovingAvg(e.target.checked)} className="accent-blue-500" />
+                            Moving Avg
                           </label>
                           <button
                             onClick={() => setIsDataEditorOpen(true)}
@@ -1023,11 +1075,24 @@ const App: React.FC = () => {
                         </>
                       ) : (
                         <div className="text-[10px] text-slate-400">
-                          Sc={storageResult!.params.storageCoefficient} &bull; {storageResult!.params.interval} &bull; res={storageResult!.params.resolution}
+                          {allStorageResults.length > 1
+                            ? `${allStorageResults.length} analyses`
+                            : <>Sc={storageResult!.params.storageCoefficient} &bull; {storageResult!.params.interval} &bull; res={storageResult!.params.resolution}</>
+                          }
                         </div>
                       )}
                     </div>
                   </div>
+                  {effectiveTab === 'storageChange' && allStorageResults.length > 1 && (
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-1">
+                      {allStorageResults.map((r, i) => (
+                        <div key={r.code} className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: STORAGE_COLORS[i % STORAGE_COLORS.length] }} />
+                          <span className="text-[11px] text-slate-600">{r.title} ({r.params.volumeUnit})</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex-1 min-h-0">
                     {effectiveTab === 'waterLevel' ? (
                       <TimeSeriesChart
@@ -1035,6 +1100,7 @@ const App: React.FC = () => {
                         selectedWells={selectedWells}
                         showGSE={showGSE && activeDataType.code === 'wte'}
                         showTrendLine={showTrendLine}
+                        showMovingAvg={showMovingAvg}
                         dataType={activeDataType}
                         lengthUnit={selectedRegion?.lengthUnit || 'ft'}
                         onEditMeasurement={handleChartEditMeasurement}
@@ -1052,20 +1118,48 @@ const App: React.FC = () => {
                           />
                           <YAxis stroke="#94a3b8" fontSize={10}
                             tickFormatter={(v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                            label={{ value: storageResult.params.volumeUnit, angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#94a3b8', fontSize: 10 } }}
+                            label={allStorageResults.length === 1 ? { value: storageResult.params.volumeUnit, angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#94a3b8', fontSize: 10 } } : undefined}
                           />
                           <Tooltip
                             content={({ label, payload }) => {
                               if (!payload || payload.length === 0) return null;
+                              const items = payload.filter(p => p.value !== undefined && p.value !== null);
+                              if (items.length === 0) return null;
                               return (
-                                <div className="bg-white rounded shadow-md px-2 py-1 text-[10px] border border-slate-200">
-                                  <div className="text-slate-400">{new Date(label as number).toLocaleDateString()}</div>
-                                  <div className="text-slate-700 font-medium">{(payload[0]?.value as number)?.toLocaleString(undefined, { maximumFractionDigits: 1 })} {storageResult.params.volumeUnit}</div>
+                                <div className="bg-white rounded shadow-md px-2 py-1.5 text-[10px] border border-slate-200">
+                                  <div className="text-slate-400 mb-1">{new Date(label as number).toLocaleDateString()}</div>
+                                  {items.map((p, i) => {
+                                    const resultIdx = parseInt((p.dataKey as string).replace('value_', ''));
+                                    const result = allStorageResults[resultIdx];
+                                    if (!result) return null;
+                                    return (
+                                      <div key={i} className="flex items-center gap-1.5">
+                                        {allStorageResults.length > 1 && (
+                                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: p.stroke as string }} />
+                                        )}
+                                        <span className="text-slate-700 font-medium">
+                                          {allStorageResults.length > 1 ? `${result.title}: ` : ''}
+                                          {(p.value as number)?.toLocaleString(undefined, { maximumFractionDigits: 1 })} {result.params.volumeUnit}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               );
                             }}
                           />
-                          <Line type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981' }} isAnimationActive={false} />
+                          {allStorageResults.map((r, i) => (
+                            <Line
+                              key={r.code}
+                              type="monotone"
+                              dataKey={`value_${i}`}
+                              stroke={STORAGE_COLORS[i % STORAGE_COLORS.length]}
+                              strokeWidth={i === 0 ? 2 : 1.5}
+                              dot={{ r: i === 0 ? 3 : 2, fill: STORAGE_COLORS[i % STORAGE_COLORS.length] }}
+                              isAnimationActive={false}
+                              connectNulls
+                            />
+                          ))}
                           {storageFrameDate && (
                             <ReferenceLine x={storageFrameDate.dateTs} stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1.5} />
                           )}

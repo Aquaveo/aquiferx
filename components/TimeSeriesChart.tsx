@@ -14,11 +14,18 @@ const SERIES_COLORS = [
 const GSE_COLOR = '#8B4513';
 
 
+const MOVING_AVG_WINDOWS = [
+  { months: 3, label: '3-mo MA', color: '#f97316' },   // orange
+  { months: 6, label: '6-mo MA', color: '#8b5cf6' },   // purple
+  { months: 12, label: '12-mo MA', color: '#06b6d4' }, // cyan
+];
+
 interface TimeSeriesChartProps {
   measurements: Measurement[];
   selectedWells: Well[];
   showGSE: boolean;
   showTrendLine: boolean;
+  showMovingAvg: boolean;
   dataType: DataType;
   lengthUnit?: 'ft' | 'm';
   referenceDate?: number;
@@ -39,7 +46,7 @@ interface DotPosition extends SelectedPoint {
 
 const HIT_RADIUS = 15;
 
-const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selectedWells, showGSE, showTrendLine, dataType, lengthUnit = 'ft', referenceDate, onEditMeasurement, onDeleteMeasurement }) => {
+const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selectedWells, showGSE, showTrendLine, showMovingAvg, dataType, lengthUnit = 'ft', referenceDate, onEditMeasurement, onDeleteMeasurement }) => {
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [editModal, setEditModal] = useState(false);
@@ -192,16 +199,61 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
     return lines;
   }, [showTrendLine, measurements, selectedWells]);
 
-  // Merge trend line endpoints into chart data
-  const finalChartData = useMemo(() => {
-    if (!trendData) return chartData;
+  // Compute moving averages per well from the PCHIP-interpolated data
+  const movingAvgData = useMemo(() => {
+    if (!showMovingAvg || chartData.length === 0 || wellIds.length === 0) return null;
 
-    // Collect all trend timestamps that might not exist in chartData
-    const timestamps = new Set<number>();
-    for (const { startDate, endDate } of trendData.values()) {
-      timestamps.add(startDate);
-      timestamps.add(endDate);
+    const MS_PER_MONTH = (365.25 / 12) * 86400000;
+    const result = new Map<string, Map<number, number>[]>(); // wellId -> [window0Map, window1Map, ...]
+
+    for (const wellId of wellIds) {
+      // Extract sorted (timestamp, value) pairs from chart data (includes both PCHIP and actual measurements)
+      const points: { t: number; v: number }[] = [];
+      for (const row of chartData) {
+        const v = row[`val_${wellId}`];
+        if (v !== undefined && v !== null) {
+          points.push({ t: row.date as number, v: v as number });
+        }
+      }
+      if (points.length < 2) continue;
+
+      const windowMaps: Map<number, number>[] = [];
+      for (const { months } of MOVING_AVG_WINDOWS) {
+        const halfWindow = (months * MS_PER_MONTH) / 2;
+        const maMap = new Map<number, number>();
+
+        // Use a sliding window with two pointers
+        let lo = 0;
+        for (let i = 0; i < points.length; i++) {
+          const center = points[i].t;
+          // Advance lo to the start of the window
+          while (lo < points.length && points[lo].t < center - halfWindow) lo++;
+          // Find hi (inclusive)
+          let hi = i;
+          while (hi + 1 < points.length && points[hi + 1].t <= center + halfWindow) hi++;
+
+          // Only compute if we have data spanning at least half the window
+          const span = points[hi].t - points[lo].t;
+          if (span >= halfWindow) {
+            let sum = 0, count = 0;
+            for (let j = lo; j <= hi; j++) {
+              sum += points[j].v;
+              count++;
+            }
+            maMap.set(center, sum / count);
+          }
+        }
+        windowMaps.push(maMap);
+      }
+      result.set(wellId, windowMaps);
     }
+
+    return result.size > 0 ? result : null;
+  }, [showMovingAvg, chartData, wellIds]);
+
+  // Merge trend line endpoints and moving averages into chart data
+  const finalChartData = useMemo(() => {
+    if (!trendData && !movingAvgData) return chartData;
 
     // Index existing chart data by timestamp
     const byTime = new Map<number, Record<string, any>>();
@@ -209,23 +261,35 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
       byTime.set(point.date as number, { ...point });
     }
 
-    // Ensure trend endpoints exist
-    for (const t of timestamps) {
-      if (!byTime.has(t)) {
-        byTime.set(t, { date: t });
+    // Ensure trend endpoints exist and inject values
+    if (trendData) {
+      for (const { startDate, endDate } of trendData.values()) {
+        if (!byTime.has(startDate)) byTime.set(startDate, { date: startDate });
+        if (!byTime.has(endDate)) byTime.set(endDate, { date: endDate });
+      }
+      for (const [wellId, line] of trendData) {
+        const startPoint = byTime.get(line.startDate);
+        const endPoint = byTime.get(line.endDate);
+        if (startPoint) startPoint[`trend_${wellId}`] = line.startVal;
+        if (endPoint) endPoint[`trend_${wellId}`] = line.endVal;
       }
     }
 
-    // Inject trend values
-    for (const [wellId, line] of trendData) {
-      const startPoint = byTime.get(line.startDate);
-      const endPoint = byTime.get(line.endDate);
-      if (startPoint) startPoint[`trend_${wellId}`] = line.startVal;
-      if (endPoint) endPoint[`trend_${wellId}`] = line.endVal;
+    // Inject moving average values
+    if (movingAvgData) {
+      for (const [wellId, windowMaps] of movingAvgData) {
+        for (let wi = 0; wi < windowMaps.length; wi++) {
+          const key = `ma${MOVING_AVG_WINDOWS[wi].months}_${wellId}`;
+          for (const [t, v] of windowMaps[wi]) {
+            const point = byTime.get(t);
+            if (point) point[key] = v;
+          }
+        }
+      }
     }
 
     return Array.from(byTime.values()).sort((a, b) => (a.date as number) - (b.date as number));
-  }, [chartData, trendData]);
+  }, [chartData, trendData, movingAvgData]);
 
   if (measurements.length === 0) {
     return (
@@ -257,7 +321,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
     const allValues: number[] = [];
     for (const point of finalChartData) {
       for (const key of Object.keys(point)) {
-        if ((key.startsWith('val_') || key.startsWith('trend_')) && point[key] != null) {
+        if ((key.startsWith('val_') || key.startsWith('trend_') || key.startsWith('ma')) && point[key] != null) {
           allValues.push(point[key] as number);
         }
       }
@@ -369,12 +433,13 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
           <Tooltip
             content={({ label, payload }) => {
               if (!payload || payload.length === 0 || label == null) return null;
-              const entries = (payload as any[]).filter(p => p.dataKey?.startsWith('val_'));
-              if (entries.length === 0) return null;
+              const valEntries = (payload as any[]).filter(p => p.dataKey?.startsWith('val_'));
+              const maEntries = (payload as any[]).filter(p => p.dataKey?.startsWith('ma') && p.value != null);
+              if (valEntries.length === 0 && maEntries.length === 0) return null;
               return (
                 <div className="bg-white rounded-lg shadow-md px-2.5 py-1.5 text-xs border border-slate-200">
                   <div className="text-slate-500">{new Date(label as number).toLocaleDateString()}</div>
-                  {entries.map((entry: any) => {
+                  {valEntries.map((entry: any) => {
                     const wellId = entry.dataKey.replace('val_', '');
                     return (
                       <div key={entry.dataKey} className="flex items-center gap-1.5 text-slate-700">
@@ -386,21 +451,33 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
                       </div>
                     );
                   })}
+                  {maEntries.map((entry: any) => (
+                    <div key={entry.dataKey} className="flex items-center gap-1.5 text-slate-500">
+                      <span className="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0" style={{ backgroundColor: entry.color }} />
+                      <span>{entry.value?.toFixed(2)}</span>
+                      <span className="text-slate-400">{entry.name}</span>
+                    </div>
+                  ))}
                 </div>
               );
             }}
           />
-          {selectedWells.length > 1 && (
+          {(selectedWells.length > 1 || (showMovingAvg && movingAvgData)) && (
             <Legend
               formatter={(value: string) => {
-                const wellId = value.replace(/^val_/, '');
-                return wellNameMap.get(wellId) || wellId;
+                if (value.startsWith('val_')) {
+                  const wellId = value.replace('val_', '');
+                  return wellNameMap.get(wellId) || wellId;
+                }
+                // Moving average labels are set via name prop
+                return value;
               }}
             />
           )}
           {wellIds.map((wellId, i) => {
             const color = SERIES_COLORS[i % SERIES_COLORS.length];
             const isMulti = selectedWells.length > 1;
+            const maActive = showMovingAvg && !!movingAvgData;
             return (
               <React.Fragment key={wellId}>
                 {/* Interpolated curve */}
@@ -408,12 +485,12 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
                   type="linear"
                   dataKey={`val_${wellId}`}
                   stroke={color}
-                  strokeWidth={2}
+                  strokeWidth={maActive ? 1 : 2}
                   dot={false}
                   connectNulls
                   isAnimationActive={!isMulti}
                   animationDuration={400}
-                  activeDot={{ r: 6, strokeWidth: 0, fill: color }}
+                  activeDot={{ r: maActive ? 4 : 6, strokeWidth: 0, fill: color }}
                   name={`val_${wellId}`}
                 />
                 {/* Actual measurement dots */}
@@ -433,6 +510,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
                     dotPositionsRef.current.push({ cx, cy, wellId, date: payload.date, value: payload[`dot_${wellId}`] });
 
                     const isSelected = selectedPoint?.wellId === wellId && selectedPoint?.date === payload.date;
+                    const dotR = maActive ? (isMulti ? 1.5 : 2) : (isMulti ? 2.5 : 3);
                     return (
                       <g key={`${wellId}-${payload.date}`}>
                         {isSelected && (
@@ -440,7 +518,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
                         )}
                         <circle
                           cx={cx} cy={cy}
-                          r={isMulti ? 2.5 : 3}
+                          r={dotR}
                           fill={color}
                           stroke="transparent"
                           strokeWidth={0}
@@ -497,6 +575,27 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
                 name={`trend_${wellId}`}
               />
             );
+          })}
+          {showMovingAvg && movingAvgData && wellIds.map((wellId) => {
+            if (!movingAvgData.has(wellId)) return null;
+            return MOVING_AVG_WINDOWS.map(({ months, label, color }) => {
+              const key = `ma${months}_${wellId}`;
+              return (
+                <Line
+                  key={key}
+                  type="monotone"
+                  dataKey={key}
+                  stroke={color}
+                  strokeWidth={2}
+                  strokeDasharray="6 3"
+                  dot={false}
+                  connectNulls
+                  isAnimationActive={false}
+                  legendType="plainline"
+                  name={wellIds.length > 1 ? `${label} (${wellNameMap.get(wellId)})` : label}
+                />
+              );
+            });
           })}
           {referenceDate != null && (
             <ReferenceLine x={referenceDate} stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1.5} />

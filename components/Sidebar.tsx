@@ -20,9 +20,11 @@ interface SidebarProps {
   onDeleteAquifer: (id: string) => void;
   storageMeta: StorageAnalysisMeta[];
   activeStorageCode: string | null;
+  compareStorageCodes: string[];
   loadingStorageCode: string | null;
   onLoadStorage: (meta: StorageAnalysisMeta) => void;
   onUnloadStorage: () => void;
+  onToggleCompareStorage: (meta: StorageAnalysisMeta) => void;
   onDeleteStorage: (meta: StorageAnalysisMeta) => void;
 }
 
@@ -42,9 +44,11 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeleteAquifer,
   storageMeta,
   activeStorageCode,
+  compareStorageCodes,
   loadingStorageCode,
   onLoadStorage,
   onUnloadStorage,
+  onToggleCompareStorage,
   onDeleteStorage,
 }) => {
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -389,6 +393,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <div className="ml-8 mt-0.5 mb-1 space-y-0.5">
                         {aquiferRasters.map(m => {
                           const isActive = activeStorageCode === m.code;
+                          const isCompare = compareStorageCodes.includes(m.code);
                           const isLoading = loadingStorageCode === m.code;
                           const rasterMenuKey = `raster-${m.regionId}-${m.code}`;
                           const isRasterMenuOpen = menuOpen === rasterMenuKey;
@@ -421,21 +426,34 @@ const Sidebar: React.FC<SidebarProps> = ({
                               <div className={`flex items-center rounded transition-colors ${
                                 isActive
                                   ? 'bg-emerald-50'
-                                  : 'hover:bg-slate-50'
+                                  : isCompare
+                                    ? 'bg-blue-50'
+                                    : 'hover:bg-slate-50'
                               }`}>
                                 <button
-                                  onClick={() => isActive ? onUnloadStorage() : onLoadStorage(m)}
+                                  onClick={(e) => {
+                                    if (e.shiftKey && activeStorageCode) {
+                                      onToggleCompareStorage(m);
+                                    } else if (isActive) {
+                                      onUnloadStorage();
+                                    } else {
+                                      onLoadStorage(m);
+                                    }
+                                  }}
                                   className={`flex-1 text-left pl-2 pr-1 py-1.5 text-xs flex items-center gap-2 min-w-0 ${
                                     isActive
                                       ? 'text-emerald-700 font-medium'
-                                      : 'text-slate-500 hover:text-slate-700'
+                                      : isCompare
+                                        ? 'text-blue-700 font-medium'
+                                        : 'text-slate-500 hover:text-slate-700'
                                   }`}
                                 >
                                   {isLoading
                                     ? <Loader2 size={12} className="flex-shrink-0 animate-spin" />
-                                    : <Layers size={12} className={`flex-shrink-0 ${isActive ? 'text-emerald-500' : 'text-slate-300'}`} />}
+                                    : <Layers size={12} className={`flex-shrink-0 ${isActive ? 'text-emerald-500' : isCompare ? 'text-blue-500' : 'text-slate-300'}`} />}
                                   <span className="truncate">{m.title}</span>
                                   {isActive && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />}
+                                  {isCompare && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
                                 </button>
                                 <div
                                   onClick={e => {

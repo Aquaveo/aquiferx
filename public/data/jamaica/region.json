@@ -8,6 +8,11 @@
       "code": "wte",
       "name": "Water Table Elevation",
       "unit": "m"
+    },
+    {
+      "code": "salt",
+      "name": "Salinity",
+      "unit": "mg/L"
     }
   ]
 }
