@@ -586,12 +586,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
             <span className="text-xs text-slate-600">Aquifer IDs</span>
           </label>
           <label className="flex items-center gap-1 cursor-pointer">
-            <input type="checkbox" checked={showWellIds} onChange={(e) => setShowWellIds(e.target.checked)} className="w-3 h-3" />
-            <span className="text-xs text-slate-600">Well IDs</span>
-          </label>
-          <label className="flex items-center gap-1 cursor-pointer">
             <input type="checkbox" checked={showWellNames} onChange={(e) => setShowWellNames(e.target.checked)} className="w-3 h-3" />
             <span className="text-xs text-slate-600">Well names</span>
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" checked={showWellIds} onChange={(e) => setShowWellIds(e.target.checked)} className="w-3 h-3" />
+            <span className="text-xs text-slate-600">Well IDs</span>
           </label>
         </div>
       </div>

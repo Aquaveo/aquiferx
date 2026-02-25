@@ -78,7 +78,8 @@ const App: React.FC = () => {
   const [isDataEditorOpen, setIsDataEditorOpen] = useState(false);
   const [showGSE, setShowGSE] = useState(false);
   const [showTrendLine, setShowTrendLine] = useState(false);
-  const [showMovingAvg, setShowMovingAvg] = useState(false);
+  const [showSmooth, setShowSmooth] = useState(false);
+  const [smoothMonths, setSmoothMonths] = useState(3);
   const [trendColors, setTrendColors] = useState<Map<string, string> | null>(null);
   const [aquiferTrendColors, setAquiferTrendColors] = useState<Map<string, string> | null>(null);
   const [showTrends, setShowTrends] = useState(false);
@@ -1187,9 +1188,25 @@ const App: React.FC = () => {
                             Trend Line
                           </label>
                           <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-                            <input type="checkbox" checked={showMovingAvg} onChange={(e) => setShowMovingAvg(e.target.checked)} className="accent-blue-500" />
-                            Moving Avg
+                            <input type="checkbox" checked={showSmooth} onChange={(e) => setShowSmooth(e.target.checked)} className="accent-blue-500" />
+                            Smooth
                           </label>
+                          {showSmooth && (
+                            <label className="flex items-center gap-1 text-xs text-slate-600 select-none">
+                              <span>months:</span>
+                              <input
+                                type="number"
+                                min={3}
+                                step={3}
+                                value={smoothMonths}
+                                onChange={(e) => {
+                                  const v = Math.max(3, Math.round(parseInt(e.target.value) / 3) * 3 || 3);
+                                  setSmoothMonths(v);
+                                }}
+                                className="w-12 border border-slate-300 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
+                            </label>
+                          )}
                           <button
                             onClick={() => setIsDataEditorOpen(true)}
                             disabled={selectedWells.length !== 1}
@@ -1243,7 +1260,8 @@ const App: React.FC = () => {
                         selectedWells={selectedWells}
                         showGSE={showGSE && activeDataType.code === 'wte'}
                         showTrendLine={showTrendLine}
-                        showMovingAvg={showMovingAvg}
+                        showSmooth={showSmooth}
+                        smoothMonths={smoothMonths}
                         dataType={activeDataType}
                         lengthUnit={selectedRegion?.lengthUnit || 'ft'}
                         onEditMeasurement={handleChartEditMeasurement}
