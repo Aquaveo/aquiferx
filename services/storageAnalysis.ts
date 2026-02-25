@@ -206,19 +206,21 @@ export async function runStorageAnalysis(
         smoothed[i] = sum / count;
       }
 
-      // Sample the smoothed series at the original interval dates
+      // Sample the smoothed series at the original interval dates via linear interpolation
       const newValues: (number | null)[] = intervalTimestamps.map(t => {
         if (t < minT || t > maxT) return null;
-        // Find nearest monthly timestamp
-        let bestIdx = -1, bestDist = Infinity;
-        for (let i = 0; i < validMonthlyTs.length; i++) {
-          const dist = Math.abs(validMonthlyTs[i] - t);
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestIdx = i;
-          }
+        if (t < validMonthlyTs[0] || t > validMonthlyTs[validMonthlyTs.length - 1]) return null;
+        // Binary search for the interval containing t
+        let lo = 0, hi = validMonthlyTs.length - 1;
+        while (lo < hi - 1) {
+          const mid = (lo + hi) >> 1;
+          if (validMonthlyTs[mid] <= t) lo = mid; else hi = mid;
         }
-        return bestIdx >= 0 ? smoothed[bestIdx] : null;
+        if (lo === hi || validMonthlyTs[lo] === validMonthlyTs[hi]) {
+          return smoothed[lo];
+        }
+        const frac = (t - validMonthlyTs[lo]) / (validMonthlyTs[hi] - validMonthlyTs[lo]);
+        return smoothed[lo] + frac * (smoothed[hi] - smoothed[lo]);
       });
 
       entry.values = newValues;

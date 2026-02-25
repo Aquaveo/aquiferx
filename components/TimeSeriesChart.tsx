@@ -199,47 +199,89 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
     return lines;
   }, [showTrendLine, measurements, selectedWells, trendWindowStart]);
 
-  // Compute a single smoothed (moving average) line per well from the PCHIP-interpolated data
+  // Compute a single smoothed (moving average) line per well.
+  // Approach: resample raw measurements to uniform monthly grid via PCHIP,
+  // apply centered moving average on that regular grid, then map back to chart timestamps.
   const smoothData = useMemo(() => {
-    if (!showSmooth || chartData.length === 0 || wellIds.length === 0) return null;
+    if (!showSmooth || measurements.length === 0 || wellIds.length === 0) return null;
 
-    const MS_PER_MONTH = (365.25 / 12) * 86400000;
-    const halfWindow = (smoothMonths * MS_PER_MONTH) / 2;
+    const MS_PER_MONTH = 30.4375 * 24 * 60 * 60 * 1000;
+    const halfWindow = smoothMonths / 2;
+
+    const byWell = new Map<string, Measurement[]>();
+    for (const m of measurements) {
+      if (!byWell.has(m.wellId)) byWell.set(m.wellId, []);
+      byWell.get(m.wellId)!.push(m);
+    }
+
     const result = new Map<string, Map<number, number>>();
 
     for (const wellId of wellIds) {
-      const points: { t: number; v: number }[] = [];
-      for (const row of chartData) {
-        const v = row[`val_${wellId}`];
-        if (v !== undefined && v !== null) {
-          points.push({ t: row.date as number, v: v as number });
-        }
+      const wellMeas = byWell.get(wellId);
+      if (!wellMeas) continue;
+
+      const sorted = [...wellMeas]
+        .filter(m => !isNaN(new Date(m.date).getTime()))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      if (sorted.length < 2) continue;
+
+      const xValues = sorted.map(m => new Date(m.date).getTime());
+      const yValues = sorted.map(m => m.value);
+      const minT = xValues[0];
+      const maxT = xValues[xValues.length - 1];
+
+      // Generate monthly timestamps spanning the well's data range
+      const monthlyTs: number[] = [];
+      const cursor = new Date(minT);
+      while (cursor.getTime() <= maxT) {
+        monthlyTs.push(cursor.getTime());
+        cursor.setMonth(cursor.getMonth() + 1);
       }
-      if (points.length < 2) continue;
+      if (monthlyTs.length < 2) continue;
 
-      const maMap = new Map<number, number>();
-      let lo = 0;
-      for (let i = 0; i < points.length; i++) {
-        const center = points[i].t;
-        while (lo < points.length && points[lo].t < center - halfWindow) lo++;
-        let hi = i;
-        while (hi + 1 < points.length && points[hi + 1].t <= center + halfWindow) hi++;
+      // PCHIP interpolate to uniform monthly grid
+      const monthlyValues = interpolatePCHIP(xValues, yValues, monthlyTs);
 
-        const span = points[hi].t - points[lo].t;
-        if (span >= halfWindow) {
-          let sum = 0, count = 0;
-          for (let j = lo; j <= hi; j++) {
-            sum += points[j].v;
+      // Apply centered moving average over the monthly series
+      const smoothed: number[] = new Array(monthlyValues.length);
+      for (let i = 0; i < monthlyValues.length; i++) {
+        const centerT = monthlyTs[i];
+        const windowMinT = centerT - halfWindow * MS_PER_MONTH;
+        const windowMaxT = centerT + halfWindow * MS_PER_MONTH;
+        let sum = 0, count = 0;
+        for (let j = 0; j < monthlyValues.length; j++) {
+          if (monthlyTs[j] >= windowMinT && monthlyTs[j] <= windowMaxT) {
+            sum += monthlyValues[j];
             count++;
           }
-          maMap.set(center, sum / count);
+        }
+        smoothed[i] = sum / count;
+      }
+
+      // Map smoothed monthly values back to chart timestamps via linear interpolation
+      const smoothMap = new Map<number, number>();
+      for (const row of chartData) {
+        const t = row.date as number;
+        if (row[`val_${wellId}`] === undefined) continue;
+        if (t < monthlyTs[0] || t > monthlyTs[monthlyTs.length - 1]) continue;
+        // Binary search for the interval containing t
+        let lo = 0, hi = monthlyTs.length - 1;
+        while (lo < hi - 1) {
+          const mid = (lo + hi) >> 1;
+          if (monthlyTs[mid] <= t) lo = mid; else hi = mid;
+        }
+        if (lo === hi || monthlyTs[lo] === monthlyTs[hi]) {
+          smoothMap.set(t, smoothed[lo]);
+        } else {
+          const frac = (t - monthlyTs[lo]) / (monthlyTs[hi] - monthlyTs[lo]);
+          smoothMap.set(t, smoothed[lo] + frac * (smoothed[hi] - smoothed[lo]));
         }
       }
-      if (maMap.size > 0) result.set(wellId, maMap);
+      if (smoothMap.size > 0) result.set(wellId, smoothMap);
     }
 
     return result.size > 0 ? result : null;
-  }, [showSmooth, smoothMonths, chartData, wellIds]);
+  }, [showSmooth, smoothMonths, measurements, wellIds, chartData]);
 
   // Merge trend line endpoints and smooth data into chart data
   const finalChartData = useMemo(() => {
