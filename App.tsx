@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3 } from 'lucide-react';
+import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3, Maximize2, X } from 'lucide-react';
 import { Region, Aquifer, Well, Measurement, DataType, StorageAnalysisResult, StorageAnalysisMeta, CrossSectionProfile } from './types';
 import { loadAllData } from './services/dataLoader';
 import { freshFetch } from './services/importUtils';
@@ -63,6 +63,128 @@ function median(values: number[]): number {
   return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+// --- Draggable / resizable floating window for expanded chart ---
+const MIN_WIN_W = 480;
+const MIN_WIN_H = 320;
+
+const ExpandedChartWindow: React.FC<{
+  onClose: () => void;
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+}> = ({ onClose, title, subtitle, children }) => {
+  const winRef = useRef<HTMLDivElement>(null);
+
+  // Initialise centered at 80% viewport
+  const initRect = useRef({
+    x: Math.round(window.innerWidth * 0.1),
+    y: Math.round(window.innerHeight * 0.05),
+    w: Math.round(window.innerWidth * 0.8),
+    h: Math.round(window.innerHeight * 0.85),
+  });
+
+  // --- Title-bar drag to move ---
+  const handleTitleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const el = winRef.current;
+    if (!el) return;
+    const startX = e.clientX, startY = e.clientY;
+    const startLeft = el.offsetLeft, startTop = el.offsetTop;
+
+    const onMove = (me: MouseEvent) => {
+      const nx = Math.max(0, Math.min(window.innerWidth - 100, startLeft + me.clientX - startX));
+      const ny = Math.max(0, Math.min(window.innerHeight - 40, startTop + me.clientY - startY));
+      el.style.left = `${nx}px`;
+      el.style.top = `${ny}px`;
+    };
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  // --- Corner / edge resize ---
+  const handleResizeMouseDown = (e: React.MouseEvent, edgeX: -1 | 0 | 1, edgeY: -1 | 0 | 1) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = winRef.current;
+    if (!el) return;
+    const startMX = e.clientX, startMY = e.clientY;
+    const startL = el.offsetLeft, startT = el.offsetTop, startW = el.offsetWidth, startH = el.offsetHeight;
+
+    const onMove = (me: MouseEvent) => {
+      const dx = me.clientX - startMX, dy = me.clientY - startMY;
+      let newL = startL, newT = startT, newW = startW, newH = startH;
+
+      if (edgeX === 1) newW = Math.max(MIN_WIN_W, startW + dx);
+      if (edgeX === -1) { newW = Math.max(MIN_WIN_W, startW - dx); newL = startL + startW - newW; }
+      if (edgeY === 1) newH = Math.max(MIN_WIN_H, startH + dy);
+      if (edgeY === -1) { newH = Math.max(MIN_WIN_H, startH - dy); newT = startT + startH - newH; }
+
+      el.style.left = `${newL}px`;
+      el.style.top = `${newT}px`;
+      el.style.width = `${newW}px`;
+      el.style.height = `${newH}px`;
+    };
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const r = initRect.current;
+  return (
+    <div
+      ref={winRef}
+      className="fixed z-[100] bg-white rounded-lg shadow-2xl border border-slate-300 flex flex-col overflow-hidden"
+      style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
+    >
+      {/* Title bar — drag to move */}
+      <div
+        className="flex items-center justify-between px-4 py-2 border-b border-slate-200 bg-slate-50 cursor-move select-none flex-shrink-0"
+        onMouseDown={handleTitleMouseDown}
+      >
+        <div className="flex items-center space-x-3 min-w-0">
+          <Activity size={16} className="text-blue-500 flex-shrink-0" />
+          <span className="font-semibold text-sm text-slate-800 truncate">{title}</span>
+          <span className="text-[11px] text-slate-400 flex-shrink-0">{subtitle}</span>
+        </div>
+        <button
+          onClick={onClose}
+          onMouseDown={e => e.stopPropagation()}
+          className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded transition-colors flex-shrink-0"
+          title="Close"
+        >
+          <X size={16} />
+        </button>
+      </div>
+
+      {/* Chart body */}
+      <div className="flex-1 min-h-0 p-3">
+        {children}
+      </div>
+
+      {/* Resize handles (edges + corners) */}
+      {/* right */}
+      <div className="absolute top-0 right-0 w-1.5 h-full cursor-ew-resize" onMouseDown={e => handleResizeMouseDown(e, 1, 0)} />
+      {/* bottom */}
+      <div className="absolute bottom-0 left-0 h-1.5 w-full cursor-ns-resize" onMouseDown={e => handleResizeMouseDown(e, 0, 1)} />
+      {/* left */}
+      <div className="absolute top-0 left-0 w-1.5 h-full cursor-ew-resize" onMouseDown={e => handleResizeMouseDown(e, -1, 0)} />
+      {/* top */}
+      <div className="absolute top-0 left-0 h-1.5 w-full cursor-ns-resize" onMouseDown={e => handleResizeMouseDown(e, 0, -1)} />
+      {/* bottom-right corner */}
+      <div className="absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize" onMouseDown={e => handleResizeMouseDown(e, 1, 1)} />
+      {/* bottom-left corner */}
+      <div className="absolute bottom-0 left-0 w-3 h-3 cursor-nesw-resize" onMouseDown={e => handleResizeMouseDown(e, -1, 1)} />
+      {/* top-right corner */}
+      <div className="absolute top-0 right-0 w-3 h-3 cursor-nesw-resize" onMouseDown={e => handleResizeMouseDown(e, 1, -1)} />
+      {/* top-left corner */}
+      <div className="absolute top-0 left-0 w-3 h-3 cursor-nwse-resize" onMouseDown={e => handleResizeMouseDown(e, -1, -1)} />
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const [regions, setRegions] = useState<Region[]>([]);
   const [aquifers, setAquifers] = useState<Aquifer[]>([]);
@@ -95,38 +217,42 @@ const App: React.FC = () => {
   const [activeTimeSeriesTab, setActiveTimeSeriesTab] = useState<'waterLevel' | 'storageChange' | 'crossSection'>('waterLevel');
   const [storageFrameDate, setStorageFrameDate] = useState<{ date: string; dateTs: number } | null>(null);
   const [chartHeight, setChartHeight] = useState(250);
+  const [isChartExpanded, setIsChartExpanded] = useState(false);
   const isDraggingDividerRef = useRef(false);
   const dragStartYRef = useRef(0);
   const dragStartHeightRef = useRef(0);
   const mapViewRef = useRef<MapViewHandle>(null);
   const splitContainerRef = useRef<HTMLDivElement>(null);
+  const chartPanelRef = useRef<HTMLDivElement>(null);
 
-  // Divider drag handlers for resizing the chart panel
+  // Divider drag handlers — direct DOM manipulation during drag to avoid full re-renders
   const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     isDraggingDividerRef.current = true;
     dragStartYRef.current = e.clientY;
     dragStartHeightRef.current = chartHeight;
-  }, [chartHeight]);
 
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
+    const onMove = (me: MouseEvent) => {
       if (!isDraggingDividerRef.current) return;
-      const dy = dragStartYRef.current - e.clientY; // dragging up = positive = taller chart
+      const dy = dragStartYRef.current - me.clientY;
       const containerH = splitContainerRef.current?.clientHeight || 600;
       const newHeight = Math.min(Math.max(100, dragStartHeightRef.current + dy), containerH - 100);
-      setChartHeight(newHeight);
+      if (chartPanelRef.current) chartPanelRef.current.style.height = `${newHeight}px`;
     };
-    const handleMouseUp = () => {
+
+    const onUp = (me: MouseEvent) => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
       isDraggingDividerRef.current = false;
+      const dy = dragStartYRef.current - me.clientY;
+      const containerH = splitContainerRef.current?.clientHeight || 600;
+      const finalHeight = Math.min(Math.max(100, dragStartHeightRef.current + dy), containerH - 100);
+      setChartHeight(finalHeight);
     };
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, []);
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [chartHeight]);
 
   // Keep visibleRegionIds in sync when regions load/change
   useEffect(() => {
@@ -1091,6 +1217,7 @@ const App: React.FC = () => {
             </div>
           )}
           <div
+            ref={chartPanelRef}
             className={`border-t border-slate-200 bg-white flex-shrink-0 ${
               (selectedWells.length > 0 || storageResult || crossSectionProfile) ? '' : 'h-0 overflow-hidden'
             }`}
@@ -1224,6 +1351,13 @@ const App: React.FC = () => {
                           >
                             <Download size={14} />
                             <span>Export CSV</span>
+                          </button>
+                          <button
+                            onClick={() => setIsChartExpanded(true)}
+                            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition-colors"
+                            title="Expand chart"
+                          >
+                            <Maximize2 size={14} />
                           </button>
                           <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
                             Units: {activeDataType.unit === 'm' ? 'Meters' : activeDataType.unit === 'ft' ? 'Feet' : activeDataType.unit} ({activeDataType.code.toUpperCase()})
@@ -1387,6 +1521,35 @@ const App: React.FC = () => {
           onClose={() => setIsDataEditorOpen(false)}
           onSave={handleDataEditorSave}
         />
+      )}
+
+      {/* Expanded Chart Window */}
+      {isChartExpanded && selectedWells.length > 0 && (
+        <ExpandedChartWindow
+          onClose={() => setIsChartExpanded(false)}
+          title={`${activeDataType.name}: ${
+            selectedWells.length <= 3
+              ? selectedWells.map(w => w.name).join(', ')
+              : `${selectedWells.length} wells selected`
+          }`}
+          subtitle={`Units: ${activeDataType.unit === 'm' ? 'Meters' : activeDataType.unit === 'ft' ? 'Feet' : activeDataType.unit} (${activeDataType.code.toUpperCase()})`}
+        >
+          <TimeSeriesChart
+            measurements={selectedWellMeasurements}
+            selectedWells={selectedWells}
+            showGSE={showGSE && activeDataType.code === 'wte'}
+            showTrendLine={showTrendLine}
+            showSmooth={showSmooth}
+            smoothMonths={smoothMonths}
+            dataType={activeDataType}
+            lengthUnit={selectedRegion?.lengthUnit || 'ft'}
+            onEditMeasurement={handleChartEditMeasurement}
+            onDeleteMeasurement={handleChartDeleteMeasurement}
+            referenceDate={storageResult && storageFrameDate ? storageFrameDate.dateTs : undefined}
+            trendWindowStart={showTrends ? Date.now() - trendWindowYears * MS_PER_YEAR : undefined}
+            onEscapeUnhandled={() => setIsChartExpanded(false)}
+          />
+        </ExpandedChartWindow>
       )}
     </div>
   );

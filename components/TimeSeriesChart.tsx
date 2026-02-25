@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine
 } from 'recharts';
@@ -29,6 +29,7 @@ interface TimeSeriesChartProps {
   trendWindowStart?: number;
   onEditMeasurement?: (wellId: string, date: number, newValue: number) => void;
   onDeleteMeasurement?: (wellId: string, date: number) => void;
+  onEscapeUnhandled?: () => void;
 }
 
 interface SelectedPoint {
@@ -44,7 +45,7 @@ interface DotPosition extends SelectedPoint {
 
 const HIT_RADIUS = 15;
 
-const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selectedWells, showGSE, showTrendLine, showSmooth, smoothMonths, dataType, lengthUnit = 'ft', referenceDate, trendWindowStart, onEditMeasurement, onDeleteMeasurement }) => {
+const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selectedWells, showGSE, showTrendLine, showSmooth, smoothMonths, dataType, lengthUnit = 'ft', referenceDate, trendWindowStart, onEditMeasurement, onDeleteMeasurement, onEscapeUnhandled }) => {
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [editModal, setEditModal] = useState(false);
@@ -54,6 +55,17 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
   const wrapperRef = useRef<HTMLDivElement>(null);
   const dotPositionsRef = useRef<DotPosition[]>([]);
 
+  // Drag-to-zoom state (zoom domain is React state; drag tracking is refs to avoid re-renders)
+  const [zoomLeft, setZoomLeft] = useState<number | null>(null);
+  const [zoomRight, setZoomRight] = useState<number | null>(null);
+  const didDragRef = useRef(false);
+  const dragOverlayRef = useRef<HTMLDivElement>(null);
+  const modalsOpenRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  const zoomStartTsRef = useRef<number | null>(null);
+  const zoomEndTsRef = useRef<number | null>(null);
+  const dataDomainRef = useRef<{ min: number; max: number }>({ min: 0, max: 1 });
+
   // Dismiss on Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -62,11 +74,18 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
         else if (deleteModal) setDeleteModal(false);
         else if (contextMenu) setContextMenu(null);
         else if (selectedPoint) setSelectedPoint(null);
+        else onEscapeUnhandled?.();
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [editModal, deleteModal, contextMenu, selectedPoint]);
+  }, [editModal, deleteModal, contextMenu, selectedPoint, onEscapeUnhandled]);
+
+  // Reset zoom when wells or measurements change
+  useEffect(() => {
+    setZoomLeft(null);
+    setZoomRight(null);
+  }, [measurements, selectedWells]);
 
   const { chartData, wellIds } = useMemo(() => {
     if (measurements.length === 0 || selectedWells.length === 0) {
@@ -321,6 +340,116 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
     return Array.from(byTime.values()).sort((a, b) => (a.date as number) - (b.date as number));
   }, [chartData, trendData, smoothData]);
 
+  modalsOpenRef.current = !!(contextMenu || editModal || deleteModal);
+  // Sync data domain for pixel-to-timestamp fallback in zoom handler
+  if (zoomLeft != null && zoomRight != null) {
+    dataDomainRef.current = { min: zoomLeft, max: zoomRight };
+  } else if (finalChartData.length > 0) {
+    dataDomainRef.current = { min: finalChartData[0].date as number, max: finalChartData[finalChartData.length - 1].date as number };
+  }
+
+  // --- Drag-to-zoom: start handler (attached as React onMouseDown on the wrapper) ---
+  // Overlay positioned via direct DOM manipulation for lag-free feedback.
+  // Timestamps from Recharts events (primary) with pixel-based fallback.
+  const getPlotBounds = useCallback(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return null;
+    // Find the main chart SVG (largest one — Legend icons are small SVGs)
+    const allSvgs = wrapper.querySelectorAll('svg');
+    let svg: SVGSVGElement | null = null;
+    let maxArea = 0;
+    for (const s of allSvgs) {
+      const r = s.getBoundingClientRect();
+      const area = r.width * r.height;
+      if (area > maxArea) { maxArea = area; svg = s as SVGSVGElement; }
+    }
+    if (!svg || maxArea < 100) return null;
+    const grid = svg.querySelector('.recharts-cartesian-grid')
+      || svg.querySelector('.recharts-cartesian-grid-bg');
+    if (grid) {
+      const wr = wrapper.getBoundingClientRect();
+      const gr = grid.getBoundingClientRect();
+      if (gr.width > 0 && gr.height > 0) {
+        return { left: gr.left - wr.left, right: gr.right - wr.left, top: gr.top - wr.top, height: gr.height };
+      }
+    }
+    const rects = svg.querySelectorAll('rect');
+    const wr = wrapper.getBoundingClientRect();
+    for (const rect of rects) {
+      const rr = rect.getBoundingClientRect();
+      if (rr.width > 50 && rr.height > 50) {
+        return { left: rr.left - wr.left, right: rr.right - wr.left, top: rr.top - wr.top, height: rr.height };
+      }
+    }
+    return null;
+  }, []);
+
+  const handleZoomMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0 || modalsOpenRef.current) return;
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const plot = getPlotBounds();
+    if (!plot) return;
+    const wr = wrapper.getBoundingClientRect();
+    const x = e.clientX - wr.left;
+    if (x < plot.left || x > plot.right) return;
+
+    isDraggingRef.current = true;
+    zoomStartTsRef.current = null;
+    zoomEndTsRef.current = null;
+
+    const ds = { startX: x, wrLeft: wr.left, plotLeft: plot.left, plotRight: plot.right, plotTop: plot.top, plotHeight: plot.height };
+
+    const onMove = (me: MouseEvent) => {
+      const overlay = dragOverlayRef.current;
+      if (!overlay) return;
+      const currentX = Math.max(ds.plotLeft, Math.min(ds.plotRight, me.clientX - ds.wrLeft));
+      const left = Math.min(ds.startX, currentX);
+      const width = Math.abs(currentX - ds.startX);
+      overlay.style.display = 'block';
+      overlay.style.left = `${left}px`;
+      overlay.style.top = `${ds.plotTop}px`;
+      overlay.style.width = `${width}px`;
+      overlay.style.height = `${ds.plotHeight}px`;
+    };
+
+    const onUp = (me: MouseEvent) => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (dragOverlayRef.current) dragOverlayRef.current.style.display = 'none';
+      isDraggingRef.current = false;
+
+      let leftTs: number | null = null;
+      let rightTs: number | null = null;
+      const startTs = zoomStartTsRef.current;
+      const endTs = zoomEndTsRef.current;
+      if (startTs != null && endTs != null) {
+        leftTs = Math.min(startTs, endTs);
+        rightTs = Math.max(startTs, endTs);
+      } else {
+        const endX = Math.max(ds.plotLeft, Math.min(ds.plotRight, me.clientX - ds.wrLeft));
+        const leftPx = Math.min(ds.startX, endX);
+        const rightPx = Math.max(ds.startX, endX);
+        if (rightPx - leftPx < 5) return;
+        const { min, max } = dataDomainRef.current;
+        const plotWidth = ds.plotRight - ds.plotLeft;
+        if (plotWidth > 0 && max > min) {
+          leftTs = min + ((leftPx - ds.plotLeft) / plotWidth) * (max - min);
+          rightTs = min + ((rightPx - ds.plotLeft) / plotWidth) * (max - min);
+        }
+      }
+
+      if (leftTs != null && rightTs != null && rightTs - leftTs > 86400000) {
+        didDragRef.current = true;
+        setZoomLeft(leftTs);
+        setZoomRight(rightTs);
+      }
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [getPlotBounds]);
+
   if (measurements.length === 0) {
     return (
       <div className="h-full flex items-center justify-center bg-slate-50 text-slate-400 text-sm italic">
@@ -388,6 +517,8 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
   };
 
   const handleWrapperClick = (e: React.MouseEvent) => {
+    // Skip if just finished a drag-to-zoom gesture
+    if (didDragRef.current) { didDragRef.current = false; return; }
     // Don't interfere with context menu backdrop or modal clicks
     if (contextMenu || editModal || deleteModal) return;
     const dot = findNearestDot(e.clientX, e.clientY);
@@ -436,17 +567,33 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
     <div
       ref={wrapperRef}
       className="w-full h-full relative outline-none"
+      onMouseDownCapture={handleZoomMouseDown}
       onClick={handleWrapperClick}
       onContextMenu={handleWrapperContextMenu}
       onMouseMove={handleWrapperMouseMove}
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={finalChartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
+        <LineChart
+          data={finalChartData}
+          margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+          onMouseDown={(e: any) => {
+            if (e?.activeLabel != null) {
+              zoomStartTsRef.current = e.activeLabel as number;
+              zoomEndTsRef.current = e.activeLabel as number;
+            }
+          }}
+          onMouseMove={(e: any) => {
+            if (isDraggingRef.current && e?.activeLabel != null) {
+              zoomEndTsRef.current = e.activeLabel as number;
+            }
+          }}
+        >
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" />
           <XAxis
             dataKey="date"
             type="number"
-            domain={['auto', 'auto']}
+            domain={zoomLeft != null && zoomRight != null ? [zoomLeft, zoomRight] : ['auto', 'auto']}
+            allowDataOverflow={zoomLeft != null}
             tickFormatter={formatXAxis}
             stroke="#475569"
             fontSize={11}
@@ -494,6 +641,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
           />
           {(selectedWells.length > 1 || (showSmooth && smoothData)) && (
             <Legend
+              wrapperStyle={{ pointerEvents: 'none' }}
               formatter={(value: string) => {
                 if (value.startsWith('val_')) {
                   const wellId = value.replace('val_', '');
@@ -508,6 +656,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
             const color = SERIES_COLORS[i % SERIES_COLORS.length];
             const isMulti = selectedWells.length > 1;
             const maActive = showSmooth && !!smoothData;
+            const animate = !isMulti && zoomLeft == null;
             return (
               <React.Fragment key={wellId}>
                 {/* Interpolated curve */}
@@ -518,7 +667,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
                   strokeWidth={maActive ? 1 : 2}
                   dot={false}
                   connectNulls
-                  isAnimationActive={!isMulti}
+                  isAnimationActive={animate}
                   animationDuration={400}
                   activeDot={{ r: maActive ? 4 : 6, strokeWidth: 0, fill: color }}
                   name={`val_${wellId}`}
@@ -529,7 +678,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
                   dataKey={`dot_${wellId}`}
                   stroke="transparent"
                   connectNulls={false}
-                  isAnimationActive={!isMulti}
+                  isAnimationActive={animate}
                   animationDuration={400}
                   legendType="none"
                   dot={(props: any) => {
@@ -631,6 +780,23 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
           })}
         </LineChart>
       </ResponsiveContainer>
+
+      {/* Drag-to-zoom overlay (positioned via direct DOM manipulation for zero re-render lag) */}
+      <div
+        ref={dragOverlayRef}
+        className="absolute pointer-events-none bg-blue-500/15 border border-blue-400/30 rounded-sm"
+        style={{ display: 'none' }}
+      />
+
+      {/* Reset Zoom button */}
+      {zoomLeft != null && (
+        <button
+          className="absolute top-2 right-2 z-10 px-2 py-1 text-[11px] bg-white border border-slate-300 rounded shadow-sm hover:bg-slate-50 text-slate-600 transition-colors"
+          onClick={(e) => { e.stopPropagation(); setZoomLeft(null); setZoomRight(null); }}
+        >
+          Reset Zoom
+        </button>
+      )}
 
       {/* Context Menu */}
       {contextMenu && selectedPoint && (
