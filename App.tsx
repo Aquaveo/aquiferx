@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3, Maximize2, X } from 'lucide-react';
-import { Region, Aquifer, Well, Measurement, DataType, StorageAnalysisResult, StorageAnalysisMeta, CrossSectionProfile } from './types';
+import { Region, Aquifer, Well, Measurement, DataType, RasterAnalysisResult, RasterAnalysisMeta, CrossSectionProfile } from './types';
 import { loadAllData } from './services/dataLoader';
 import { freshFetch } from './services/importUtils';
 import { slugify } from './utils/strings';
@@ -10,9 +10,10 @@ import Sidebar from './components/Sidebar';
 import TimeSeriesChart from './components/TimeSeriesChart';
 import ImportDataHub from './components/import/ImportDataHub';
 import DataEditor from './components/DataEditor';
-import StorageAnalysisDialog from './components/StorageAnalysisDialog';
-import StorageOverlay from './components/StorageOverlay';
+import SpatialAnalysisDialog from './components/SpatialAnalysisDialog';
+import RasterOverlay from './components/RasterOverlay';
 import CrossSectionChart from './components/CrossSectionChart';
+import { computeStorageChange } from './utils/storageVolume';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from 'recharts';
@@ -209,14 +210,16 @@ const App: React.FC = () => {
   const [trendWindowYears, setTrendWindowYears] = useState(10);
   const [selectedDataType, setSelectedDataType] = useState<string>('wte');
   const [visibleRegionIds, setVisibleRegionIds] = useState<Set<string>>(new Set());
-  const [storageDialogOpen, setStorageDialogOpen] = useState(false);
-  const [storageResult, setStorageResult] = useState<StorageAnalysisResult | null>(null);
-  const [compareStorageResults, setCompareStorageResults] = useState<StorageAnalysisResult[]>([]);
-  const [storageMeta, setStorageMeta] = useState<StorageAnalysisMeta[]>([]);
-  const [loadingStorageCode, setLoadingStorageCode] = useState<string | null>(null);
+  const [rasterDialogOpen, setRasterDialogOpen] = useState(false);
+  const [rasterResult, setRasterResult] = useState<RasterAnalysisResult | null>(null);
+  const [compareRasterResults, setCompareRasterResults] = useState<RasterAnalysisResult[]>([]);
+  const [rasterMeta, setRasterMeta] = useState<RasterAnalysisMeta[]>([]);
+  const [loadingRasterCode, setLoadingRasterCode] = useState<string | null>(null);
   const [crossSectionProfile, setCrossSectionProfile] = useState<CrossSectionProfile | null>(null);
   const [activeTimeSeriesTab, setActiveTimeSeriesTab] = useState<'waterLevel' | 'storageChange' | 'crossSection'>('waterLevel');
-  const [storageFrameDate, setStorageFrameDate] = useState<{ date: string; dateTs: number } | null>(null);
+  const [rasterFrameDate, setRasterFrameDate] = useState<{ date: string; dateTs: number } | null>(null);
+  const [storageCoeff, setStorageCoeff] = useState(0.1);
+  const [storageVolumeUnit, setStorageVolumeUnit] = useState('');
   const [chartHeight, setChartHeight] = useState(250);
   const [isChartExpanded, setIsChartExpanded] = useState(false);
   const isDraggingDividerRef = useRef(false);
@@ -287,29 +290,31 @@ const App: React.FC = () => {
     setShowTrends(false);
   }, [selectedRegion?.id, selectedDataType]);
 
-  // Clear active storage overlay when aquifer changes
+  // Clear active raster overlay when aquifer changes
   useEffect(() => {
-    setStorageResult(null);
+    setRasterResult(null);
   }, [selectedAquifer?.id]);
 
-  // Auto-switch time series tab based on storage result
+  // Auto-switch time series tab based on raster result
   useEffect(() => {
-    if (storageResult) {
-      setActiveTimeSeriesTab('storageChange');
+    if (rasterResult) {
+      if (rasterResult.dataType === 'wte') {
+        setActiveTimeSeriesTab('storageChange');
+      }
     } else {
       setActiveTimeSeriesTab('waterLevel');
-      setStorageFrameDate(null);
+      setRasterFrameDate(null);
       setCrossSectionProfile(null);
     }
-    setCompareStorageResults([]);
-  }, [storageResult]);
+    setCompareRasterResults([]);
+  }, [rasterResult]);
 
   // Auto-switch to cross-section tab when profile is set
   useEffect(() => {
     if (crossSectionProfile) {
       setActiveTimeSeriesTab('crossSection');
     } else if (activeTimeSeriesTab === 'crossSection') {
-      setActiveTimeSeriesTab(storageResult ? 'storageChange' : 'waterLevel');
+      setActiveTimeSeriesTab(rasterResult?.dataType === 'wte' ? 'storageChange' : 'waterLevel');
     }
   }, [crossSectionProfile]);
 
@@ -412,8 +417,8 @@ const App: React.FC = () => {
         setAquifers(data.aquifers);
         setWells(data.wells);
         setMeasurements(data.measurements);
-        setStorageMeta(data.storageMeta);
-        console.log(`Loaded: ${data.regions.length} regions, ${data.aquifers.length} aquifers, ${data.wells.length} wells, ${data.measurements.length} measurements, ${data.storageMeta.length} storage analyses`);
+        setRasterMeta(data.storageMeta);
+        console.log(`Loaded: ${data.regions.length} regions, ${data.aquifers.length} aquifers, ${data.wells.length} wells, ${data.measurements.length} measurements, ${data.storageMeta.length} raster analyses`);
       } catch (e) {
         console.error('Failed to load data:', e);
         setLoadError(e instanceof Error ? e.message : 'Failed to load data');
@@ -432,70 +437,70 @@ const App: React.FC = () => {
       setAquifers(data.aquifers);
       setWells(data.wells);
       setMeasurements(data.measurements);
-      setStorageMeta(data.storageMeta);
+      setRasterMeta(data.storageMeta);
     } catch (e) {
       console.error('Failed to reload data:', e);
     }
   };
 
-  // Load full storage analysis from file
-  const handleLoadStorage = async (meta: StorageAnalysisMeta) => {
-    setLoadingStorageCode(meta.code);
+  // Load full raster analysis from file
+  const handleLoadRaster = async (meta: RasterAnalysisMeta) => {
+    setLoadingRasterCode(meta.code);
     try {
       const res = await fetch(`/data/${meta.filePath}`);
       if (res.ok) {
-        const fullResult: StorageAnalysisResult = await res.json();
+        const fullResult: RasterAnalysisResult = await res.json();
         // Select the aquifer if not already selected
         if (!selectedAquifer || selectedAquifer.id !== meta.aquiferId) {
           const aq = aquifers.find(a => a.id === meta.aquiferId && a.regionId === meta.regionId);
           if (aq) setSelectedAquifer(aq);
         }
-        setStorageResult(fullResult);
+        setRasterResult(fullResult);
       }
     } catch (e) {
-      console.error('Failed to load storage analysis:', e);
+      console.error('Failed to load raster analysis:', e);
     } finally {
-      setLoadingStorageCode(null);
+      setLoadingRasterCode(null);
     }
   };
 
-  const handleStorageFrameChange = useCallback((date: string, dateTs: number) => {
-    setStorageFrameDate({ date, dateTs });
+  const handleRasterFrameChange = useCallback((date: string, dateTs: number) => {
+    setRasterFrameDate({ date, dateTs });
   }, []);
 
   const handleCrossSectionChange = useCallback((profile: CrossSectionProfile | null) => {
     setCrossSectionProfile(profile);
   }, []);
 
-  const handleUnloadStorage = () => {
-    setStorageResult(null);
+  const handleUnloadRaster = () => {
+    setRasterResult(null);
   };
 
-  const handleToggleCompareStorage = async (meta: StorageAnalysisMeta) => {
-    if (storageResult && storageResult.code === meta.code && storageResult.regionId === meta.regionId) return;
-    const existingIdx = compareStorageResults.findIndex(r => r.code === meta.code && r.regionId === meta.regionId);
+  const handleToggleCompareRaster = async (meta: RasterAnalysisMeta) => {
+    if (rasterResult && rasterResult.code === meta.code && rasterResult.regionId === meta.regionId) return;
+    const existingIdx = compareRasterResults.findIndex(r => r.code === meta.code && r.regionId === meta.regionId);
     if (existingIdx >= 0) {
-      setCompareStorageResults(prev => prev.filter((_, i) => i !== existingIdx));
+      setCompareRasterResults(prev => prev.filter((_, i) => i !== existingIdx));
       return;
     }
     try {
       const res = await fetch(`/data/${meta.filePath}`);
       if (res.ok) {
-        const fullResult: StorageAnalysisResult = await res.json();
-        setCompareStorageResults(prev => [...prev, fullResult]);
+        const fullResult: RasterAnalysisResult = await res.json();
+        setCompareRasterResults(prev => [...prev, fullResult]);
       }
     } catch (e) {
-      console.error('Failed to load storage for comparison:', e);
+      console.error('Failed to load raster for comparison:', e);
     }
   };
 
-  const handleDeleteStorage = async (meta: StorageAnalysisMeta) => {
+  const handleDeleteRaster = async (meta: RasterAnalysisMeta) => {
     // Unload if this is the active raster
-    if (storageResult?.code === meta.code) {
-      setStorageResult(null);
+    if (rasterResult?.code === meta.code) {
+      setRasterResult(null);
     }
     // Remove from metadata list
-    setStorageMeta(prev => prev.filter(m => !(m.code === meta.code && m.regionId === meta.regionId)));
+    setRasterMeta(prev => prev.filter(m => !(m.code === meta.code && m.regionId === meta.regionId)));
     // Delete the file on disk
     try {
       await fetch('/api/delete-file', {
@@ -504,7 +509,7 @@ const App: React.FC = () => {
         body: JSON.stringify({ filePath: meta.filePath }),
       });
     } catch (e) {
-      console.error('Failed to delete storage analysis file:', e);
+      console.error('Failed to delete raster analysis file:', e);
     }
   };
 
@@ -532,23 +537,47 @@ const App: React.FC = () => {
       : [],
   [selectedWells, measurements, selectedDataType]);
 
-  const allStorageResults = useMemo(() => {
-    if (!storageResult) return [];
-    return [storageResult, ...compareStorageResults];
-  }, [storageResult, compareStorageResults]);
+  const allRasterResults = useMemo(() => {
+    if (!rasterResult) return [];
+    return [rasterResult, ...compareRasterResults];
+  }, [rasterResult, compareRasterResults]);
 
+  // Set default volume unit based on region when raster result loads
+  useEffect(() => {
+    if (rasterResult && selectedRegion) {
+      setStorageVolumeUnit(prev => prev || (selectedRegion.lengthUnit === 'ft' ? 'acre-ft' : 'MCM'));
+    }
+  }, [rasterResult, selectedRegion]);
+
+  // Reset volume unit when region changes
+  useEffect(() => {
+    if (selectedRegion) {
+      setStorageVolumeUnit(selectedRegion.lengthUnit === 'ft' ? 'acre-ft' : 'MCM');
+    }
+  }, [selectedRegion?.id]);
+
+  // Compute storage change on-the-fly for WTE rasters
   const storageChartData = useMemo(() => {
-    if (allStorageResults.length === 0) return [];
+    if (allRasterResults.length === 0) return [];
+    if (allRasterResults[0].dataType !== 'wte') return [];
+
+    const lengthUnit = selectedRegion?.lengthUnit || 'ft';
+    const allSeries = allRasterResults.map(r =>
+      computeStorageChange(r, storageCoeff, storageVolumeUnit, lengthUnit)
+    );
+
     const dateSet = new Set<number>();
-    for (const r of allStorageResults) {
-      for (const s of r.storageSeries) dateSet.add(new Date(s.date).getTime());
+    for (const series of allSeries) {
+      for (const s of series) dateSet.add(new Date(s.date).getTime());
     }
     const dates = [...dateSet].sort((a, b) => a - b);
-    const lookups = allStorageResults.map(r => {
+
+    const lookups = allSeries.map(series => {
       const map = new Map<number, number>();
-      for (const s of r.storageSeries) map.set(new Date(s.date).getTime(), s.value);
+      for (const s of series) map.set(new Date(s.date).getTime(), s.value);
       return map;
     });
+
     return dates.map(d => {
       const row: Record<string, number> = { date: d };
       for (let i = 0; i < lookups.length; i++) {
@@ -557,7 +586,7 @@ const App: React.FC = () => {
       }
       return row;
     });
-  }, [allStorageResults]);
+  }, [allRasterResults, storageCoeff, storageVolumeUnit, selectedRegion?.lengthUnit]);
 
   const handleWellClick = (well: Well, shiftKey: boolean) => {
     if (shiftKey) {
@@ -975,14 +1004,14 @@ const App: React.FC = () => {
         onDeleteRegion={handleDeleteRegion}
         onRenameAquifer={handleRenameAquifer}
         onDeleteAquifer={handleDeleteAquifer}
-        storageMeta={storageMeta}
-        activeStorageCode={storageResult?.code || null}
-        compareStorageCodes={compareStorageResults.map(r => r.code)}
-        loadingStorageCode={loadingStorageCode}
-        onLoadStorage={handleLoadStorage}
-        onUnloadStorage={handleUnloadStorage}
-        onToggleCompareStorage={handleToggleCompareStorage}
-        onDeleteStorage={handleDeleteStorage}
+        rasterMeta={rasterMeta}
+        activeRasterCode={rasterResult?.code || null}
+        compareRasterCodes={compareRasterResults.map(r => r.code)}
+        loadingRasterCode={loadingRasterCode}
+        onLoadRaster={handleLoadRaster}
+        onUnloadRaster={handleUnloadRaster}
+        onToggleCompareRaster={handleToggleCompareRaster}
+        onDeleteRaster={handleDeleteRaster}
       />
 
       {/* Main Content Area */}
@@ -1086,11 +1115,11 @@ const App: React.FC = () => {
             )}
             {selectedAquifer && (
               <button
-                onClick={() => setStorageDialogOpen(true)}
+                onClick={() => setRasterDialogOpen(true)}
                 className="flex items-center space-x-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-md text-sm font-medium hover:bg-emerald-100 transition-colors"
               >
                 <BarChart3 size={16} />
-                <span>Analyze Storage</span>
+                <span>Spatial Analysis</span>
               </button>
             )}
             <button
@@ -1193,21 +1222,22 @@ const App: React.FC = () => {
                 </div>
               );
             })()}
-            {/* Storage Overlay */}
-            {storageResult && mapViewRef.current?.getMap() && (
-              <StorageOverlay
-                analysis={storageResult}
+            {/* Raster Overlay */}
+            {rasterResult && mapViewRef.current?.getMap() && (
+              <RasterOverlay
+                analysis={rasterResult}
                 map={mapViewRef.current.getMap()!}
-                onClose={() => setStorageResult(null)}
-                onFrameChange={handleStorageFrameChange}
+                onClose={() => setRasterResult(null)}
+                onFrameChange={handleRasterFrameChange}
                 lengthUnit={selectedRegion?.lengthUnit || 'ft'}
                 onCrossSectionChange={handleCrossSectionChange}
+                dataTypeName={activeDataType.name}
               />
             )}
           </div>
 
           {/* Drag handle + Time Series Section */}
-          {(selectedWells.length > 0 || storageResult || crossSectionProfile) && (
+          {(selectedWells.length > 0 || rasterResult || crossSectionProfile) && (
             <div
               onMouseDown={handleDividerMouseDown}
               className="h-1.5 bg-slate-200 hover:bg-blue-400 cursor-row-resize flex-shrink-0 transition-colors relative group"
@@ -1220,15 +1250,15 @@ const App: React.FC = () => {
           <div
             ref={chartPanelRef}
             className={`border-t border-slate-200 bg-white flex-shrink-0 ${
-              (selectedWells.length > 0 || storageResult || crossSectionProfile) ? '' : 'h-0 overflow-hidden'
+              (selectedWells.length > 0 || rasterResult || crossSectionProfile) ? '' : 'h-0 overflow-hidden'
             }`}
-            style={(selectedWells.length > 0 || storageResult || crossSectionProfile) ? { height: chartHeight } : undefined}
+            style={(selectedWells.length > 0 || rasterResult || crossSectionProfile) ? { height: chartHeight } : undefined}
           >
-            {(selectedWells.length > 0 || storageResult || crossSectionProfile) && (() => {
+            {(selectedWells.length > 0 || rasterResult || crossSectionProfile) && (() => {
               // Build available tabs dynamically
               const availableTabs: ('waterLevel' | 'storageChange' | 'crossSection')[] = [];
               if (selectedWells.length > 0) availableTabs.push('waterLevel');
-              if (storageResult) availableTabs.push('storageChange');
+              if (rasterResult?.dataType === 'wte') availableTabs.push('storageChange');
               if (crossSectionProfile) availableTabs.push('crossSection');
               const showTabs = availableTabs.length > 1;
               const effectiveTab = availableTabs.includes(activeTimeSeriesTab) ? activeTimeSeriesTab : availableTabs[0];
@@ -1285,11 +1315,8 @@ const App: React.FC = () => {
                         <>
                           {!showTabs && <BarChart3 size={18} className="text-emerald-500" />}
                           <h3 className="font-bold text-slate-800">
-                            {allStorageResults.length > 1 ? 'Storage Change Comparison' : `Storage Change: ${storageResult!.title}`}
+                            {allRasterResults.length > 1 ? 'Storage Change Comparison' : `Storage Change: ${rasterResult!.title}`}
                           </h3>
-                          {allStorageResults.length === 1 && (
-                            <span className="text-xs text-slate-400">({storageResult!.params.volumeUnit})</span>
-                          )}
                         </>
                       ) : (
                         <>
@@ -1365,25 +1392,62 @@ const App: React.FC = () => {
                           </div>
                         </>
                       ) : effectiveTab === 'storageChange' ? (
-                        <div className="text-[10px] text-slate-400">
-                          {allStorageResults.length > 1
-                            ? `${allStorageResults.length} analyses`
-                            : <>Sc={storageResult!.params.storageCoefficient} &bull; {storageResult!.params.interval} &bull; res={storageResult!.params.resolution}</>
-                          }
+                        <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-1.5 text-xs text-slate-600 select-none">
+                            <span className="font-medium">Sc</span>
+                            <button
+                              onClick={() => setStorageCoeff(Math.max(0.01, +(storageCoeff - 0.05).toFixed(2)))}
+                              disabled={storageCoeff <= 0.01}
+                              className="w-5 h-5 flex items-center justify-center rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-slate-600 text-xs"
+                            >&minus;</button>
+                            <input
+                              type="number"
+                              value={storageCoeff}
+                              min={0.01}
+                              max={1}
+                              step={0.05}
+                              onChange={e => {
+                                const v = parseFloat(e.target.value);
+                                if (!isNaN(v) && v >= 0.01 && v <= 1) setStorageCoeff(+(v.toFixed(2)));
+                              }}
+                              className="w-14 border border-slate-300 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                            <button
+                              onClick={() => setStorageCoeff(Math.min(1, +(storageCoeff + 0.05).toFixed(2)))}
+                              disabled={storageCoeff >= 1}
+                              className="w-5 h-5 flex items-center justify-center rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-slate-600 text-xs"
+                            >+</button>
+                          </label>
+                          <select
+                            value={storageVolumeUnit}
+                            onChange={e => setStorageVolumeUnit(e.target.value)}
+                            className="px-1.5 py-0.5 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-emerald-500"
+                          >
+                            {(selectedRegion?.lengthUnit === 'ft'
+                              ? [{ value: 'acre-ft', label: 'acre-ft' }, { value: 'ft3', label: 'ft\u00B3' }]
+                              : [{ value: 'MCM', label: 'MCM' }, { value: 'm3', label: 'm\u00B3' }, { value: 'km3', label: 'km\u00B3' }]
+                            ).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                          <span className="text-[10px] text-slate-400">
+                            {allRasterResults.length > 1
+                              ? `${allRasterResults.length} analyses`
+                              : <>{rasterResult!.params.interval} &bull; res={rasterResult!.params.resolution}</>
+                            }
+                          </span>
                         </div>
                       ) : (
                         <div className="text-[10px] text-slate-400">
-                          {storageFrameDate?.date || ''}
+                          {rasterFrameDate?.date || ''}
                         </div>
                       )}
                     </div>
                   </div>
-                  {effectiveTab === 'storageChange' && allStorageResults.length > 1 && (
+                  {effectiveTab === 'storageChange' && allRasterResults.length > 1 && (
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-1">
-                      {allStorageResults.map((r, i) => (
+                      {allRasterResults.map((r, i) => (
                         <div key={r.code} className="flex items-center gap-1.5">
                           <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: STORAGE_COLORS[i % STORAGE_COLORS.length] }} />
-                          <span className="text-[11px] text-slate-600">{r.title} ({r.params.volumeUnit})</span>
+                          <span className="text-[11px] text-slate-600">{r.title}</span>
                         </div>
                       ))}
                     </div>
@@ -1401,16 +1465,16 @@ const App: React.FC = () => {
                         lengthUnit={selectedRegion?.lengthUnit || 'ft'}
                         onEditMeasurement={handleChartEditMeasurement}
                         onDeleteMeasurement={handleChartDeleteMeasurement}
-                        referenceDate={storageResult && storageFrameDate ? storageFrameDate.dateTs : undefined}
+                        referenceDate={rasterResult && rasterFrameDate ? rasterFrameDate.dateTs : undefined}
                         trendWindowStart={showTrends ? Date.now() - trendWindowYears * MS_PER_YEAR : undefined}
                       />
                     ) : effectiveTab === 'crossSection' && crossSectionProfile ? (
                       <CrossSectionChart
                         profile={crossSectionProfile}
-                        frameIdx={crossSectionProfile.frameDates.indexOf(storageFrameDate?.date || crossSectionProfile.frameDates[0])}
+                        frameIdx={crossSectionProfile.frameDates.indexOf(rasterFrameDate?.date || crossSectionProfile.frameDates[0])}
                         lengthUnit={selectedRegion?.lengthUnit || 'ft'}
                       />
-                    ) : storageResult && (
+                    ) : rasterResult && storageChartData.length > 0 && (
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={storageChartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
@@ -1421,7 +1485,7 @@ const App: React.FC = () => {
                           />
                           <YAxis stroke="#94a3b8" fontSize={10}
                             tickFormatter={(v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                            label={allStorageResults.length === 1 ? { value: storageResult.params.volumeUnit, angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#94a3b8', fontSize: 10 } } : undefined}
+                            label={allRasterResults.length === 1 ? { value: storageVolumeUnit, angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#94a3b8', fontSize: 10 } } : undefined}
                           />
                           <Tooltip
                             content={({ label, payload }) => {
@@ -1433,16 +1497,16 @@ const App: React.FC = () => {
                                   <div className="text-slate-400 mb-1">{new Date(label as number).toLocaleDateString()}</div>
                                   {items.map((p, i) => {
                                     const resultIdx = parseInt((p.dataKey as string).replace('value_', ''));
-                                    const result = allStorageResults[resultIdx];
+                                    const result = allRasterResults[resultIdx];
                                     if (!result) return null;
                                     return (
                                       <div key={i} className="flex items-center gap-1.5">
-                                        {allStorageResults.length > 1 && (
+                                        {allRasterResults.length > 1 && (
                                           <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: p.stroke as string }} />
                                         )}
                                         <span className="text-slate-700 font-medium">
-                                          {allStorageResults.length > 1 ? `${result.title}: ` : ''}
-                                          {(p.value as number)?.toLocaleString(undefined, { maximumFractionDigits: 1 })} {result.params.volumeUnit}
+                                          {allRasterResults.length > 1 ? `${result.title}: ` : ''}
+                                          {(p.value as number)?.toLocaleString(undefined, { maximumFractionDigits: 1 })} {storageVolumeUnit}
                                         </span>
                                       </div>
                                     );
@@ -1451,7 +1515,7 @@ const App: React.FC = () => {
                               );
                             }}
                           />
-                          {allStorageResults.map((r, i) => (
+                          {allRasterResults.map((r, i) => (
                             <Line
                               key={r.code}
                               type="monotone"
@@ -1463,8 +1527,8 @@ const App: React.FC = () => {
                               connectNulls
                             />
                           ))}
-                          {storageFrameDate && (
-                            <ReferenceLine x={storageFrameDate.dateTs} stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1.5} />
+                          {rasterFrameDate && (
+                            <ReferenceLine x={rasterFrameDate.dateTs} stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1.5} />
                           )}
                         </LineChart>
                       </ResponsiveContainer>
@@ -1486,30 +1550,31 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* Storage Analysis Dialog */}
-      {storageDialogOpen && selectedAquifer && selectedRegion && (
-        <StorageAnalysisDialog
+      {/* Spatial Analysis Dialog */}
+      {rasterDialogOpen && selectedAquifer && selectedRegion && (
+        <SpatialAnalysisDialog
           aquifer={selectedAquifer}
           region={selectedRegion}
           wells={wells.filter(w => w.aquiferId === selectedAquifer.id && w.regionId === selectedAquifer.regionId)}
           measurements={measurements}
-          existingCodes={storageMeta.filter(a => a.aquiferId === selectedAquifer.id).map(a => a.code)}
-          onClose={() => setStorageDialogOpen(false)}
+          dataType={activeDataType}
+          existingCodes={rasterMeta.filter(a => a.aquiferId === selectedAquifer.id).map(a => a.code)}
+          onClose={() => setRasterDialogOpen(false)}
           onComplete={(result) => {
-            setStorageResult(result);
+            setRasterResult(result);
             const aquiferSlug = slugify(result.aquiferName);
-            setStorageMeta(prev => [...prev, {
+            setRasterMeta(prev => [...prev, {
               title: result.title,
               code: result.code,
               aquiferId: result.aquiferId,
               aquiferName: result.aquiferName,
               regionId: result.regionId,
-              filePath: `${result.regionId}/${aquiferSlug}/raster_wte_${result.code}.json`,
-              dataType: result.dataType || 'wte',
+              filePath: `${result.regionId}/${aquiferSlug}/raster_${result.dataType}_${result.code}.json`,
+              dataType: result.dataType,
               params: result.params,
               createdAt: result.createdAt,
             }]);
-            setStorageDialogOpen(false);
+            setRasterDialogOpen(false);
           }}
         />
       )}
@@ -1549,7 +1614,7 @@ const App: React.FC = () => {
             lengthUnit={selectedRegion?.lengthUnit || 'ft'}
             onEditMeasurement={handleChartEditMeasurement}
             onDeleteMeasurement={handleChartDeleteMeasurement}
-            referenceDate={storageResult && storageFrameDate ? storageFrameDate.dateTs : undefined}
+            referenceDate={rasterResult && rasterFrameDate ? rasterFrameDate.dateTs : undefined}
             trendWindowStart={showTrends ? Date.now() - trendWindowYears * MS_PER_YEAR : undefined}
             onEscapeUnhandled={() => setIsChartExpanded(false)}
           />

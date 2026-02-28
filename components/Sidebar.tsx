@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Region, Aquifer, StorageAnalysisMeta } from '../types';
+import { Region, Aquifer, RasterAnalysisMeta } from '../types';
 import { MapPin, Droplets, List, Box, MoreVertical, Pencil, Trash2, Download, AlertTriangle, Plus, Minus, Layers, Loader2 } from 'lucide-react';
 
 interface SidebarProps {
@@ -18,14 +18,14 @@ interface SidebarProps {
   onDeleteRegion: (id: string) => void;
   onRenameAquifer: (id: string, newName: string) => void;
   onDeleteAquifer: (id: string) => void;
-  storageMeta: StorageAnalysisMeta[];
-  activeStorageCode: string | null;
-  compareStorageCodes: string[];
-  loadingStorageCode: string | null;
-  onLoadStorage: (meta: StorageAnalysisMeta) => void;
-  onUnloadStorage: () => void;
-  onToggleCompareStorage: (meta: StorageAnalysisMeta) => void;
-  onDeleteStorage: (meta: StorageAnalysisMeta) => void;
+  rasterMeta: RasterAnalysisMeta[];
+  activeRasterCode: string | null;
+  compareRasterCodes: string[];
+  loadingRasterCode: string | null;
+  onLoadRaster: (meta: RasterAnalysisMeta) => void;
+  onUnloadRaster: () => void;
+  onToggleCompareRaster: (meta: RasterAnalysisMeta) => void;
+  onDeleteRaster: (meta: RasterAnalysisMeta) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -42,14 +42,14 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeleteRegion,
   onRenameAquifer,
   onDeleteAquifer,
-  storageMeta,
-  activeStorageCode,
-  compareStorageCodes,
-  loadingStorageCode,
-  onLoadStorage,
-  onUnloadStorage,
-  onToggleCompareStorage,
-  onDeleteStorage,
+  rasterMeta,
+  activeRasterCode,
+  compareRasterCodes,
+  loadingRasterCode,
+  onLoadRaster,
+  onUnloadRaster,
+  onToggleCompareRaster,
+  onDeleteRaster,
 }) => {
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -278,7 +278,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 const isEditing = editing === `aquifer-${a.id}`;
                 const isConfirming = confirmDelete === `aquifer-${a.id}`;
                 const isMenuOpen = menuOpen === `aquifer-${a.id}`;
-                const aquiferRasters = storageMeta.filter(m => m.aquiferId === a.id && m.regionId === a.regionId);
+                const aquiferRasters = rasterMeta.filter(m => m.aquiferId === a.id && m.regionId === a.regionId);
                 const hasRasters = aquiferRasters.length > 0;
                 const isExpanded = expandedAquiferIds.has(a.id);
 
@@ -392,9 +392,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                     {isExpanded && aquiferRasters.length > 0 && (
                       <div className="ml-8 mt-0.5 mb-1 space-y-0.5">
                         {aquiferRasters.map(m => {
-                          const isActive = activeStorageCode === m.code;
-                          const isCompare = compareStorageCodes.includes(m.code);
-                          const isLoading = loadingStorageCode === m.code;
+                          const isActive = activeRasterCode === m.code;
+                          const isCompare = compareRasterCodes.includes(m.code);
+                          const isLoading = loadingRasterCode === m.code;
                           const rasterMenuKey = `raster-${m.regionId}-${m.code}`;
                           const isRasterMenuOpen = menuOpen === rasterMenuKey;
                           const isRasterConfirming = confirmDelete === rasterMenuKey;
@@ -405,7 +405,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 <p className="text-red-700 font-medium mb-1.5">Delete "{m.title}"?</p>
                                 <div className="flex space-x-2">
                                   <button
-                                    onClick={() => { onDeleteStorage(m); setConfirmDelete(null); }}
+                                    onClick={() => { onDeleteRaster(m); setConfirmDelete(null); }}
                                     className="px-2 py-0.5 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700"
                                   >
                                     Delete
@@ -432,12 +432,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                               }`}>
                                 <button
                                   onClick={(e) => {
-                                    if (e.shiftKey && activeStorageCode) {
-                                      onToggleCompareStorage(m);
+                                    if (e.shiftKey && activeRasterCode) {
+                                      onToggleCompareRaster(m);
                                     } else if (isActive) {
-                                      onUnloadStorage();
+                                      onUnloadRaster();
                                     } else {
-                                      onLoadStorage(m);
+                                      onLoadRaster(m);
                                     }
                                   }}
                                   className={`flex-1 text-left pl-2 pr-1 py-1.5 text-xs flex items-center gap-2 min-w-0 ${
@@ -486,8 +486,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                   <div><span className="text-slate-400">Dates:</span> {m.params.startDate} &mdash; {m.params.endDate}</div>
                                   <div><span className="text-slate-400">Interval:</span> {m.params.interval}</div>
                                   <div><span className="text-slate-400">Resolution:</span> {m.params.resolution}</div>
-                                  <div><span className="text-slate-400">Sc:</span> {m.params.storageCoefficient}</div>
-                                  <div><span className="text-slate-400">Units:</span> {m.params.volumeUnit}</div>
+                                  <div><span className="text-slate-400">Data Type:</span> {m.dataType.toUpperCase()}</div>
                                   <div className="mt-1.5 text-slate-400 text-[10px]">Created {new Date(m.createdAt).toLocaleDateString()}</div>
                                 </div>
                               </div>

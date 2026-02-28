@@ -158,26 +158,6 @@ function saveDataPlugin(): Plugin {
                 }
               }
             }
-            // Backward compat: scan for old storage_*.json at top level
-            for (const entry of fs.readdirSync(regionDir)) {
-              if (entry.startsWith('storage_') && entry.endsWith('.json')) {
-                try {
-                  const data = JSON.parse(fs.readFileSync(path.join(regionDir, entry), 'utf-8'));
-                  const filePath = `${regionId}/${entry}`;
-                  results.push({
-                    title: data.title || entry,
-                    code: data.code || entry.replace('storage_', '').replace('.json', ''),
-                    aquiferId: data.aquiferId || '',
-                    aquiferName: data.aquiferName || '',
-                    regionId: data.regionId || regionId,
-                    filePath,
-                    dataType: data.dataType || 'wte',
-                    params: data.params || {},
-                    createdAt: data.createdAt || '',
-                  });
-                } catch { /* skip malformed */ }
-              }
-            }
           }
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify(results));

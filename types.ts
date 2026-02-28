@@ -58,13 +58,11 @@ export interface ChartPoint {
   isInterpolated: boolean;
 }
 
-export interface StorageAnalysisParams {
+export interface RasterAnalysisParams {
   startDate: string;
   endDate: string;
   resolution: number;
-  storageCoefficient: number;
   interval: '3months' | '6months' | '1year';
-  volumeUnit: string;
   title: string;
   minObservations: number;
   minTimeSpanYears: number;
@@ -72,7 +70,7 @@ export interface StorageAnalysisParams {
   smoothingMonths: number;
 }
 
-export interface StorageGrid {
+export interface RasterGrid {
   minLng: number;
   minLat: number;
   dx: number;
@@ -82,12 +80,12 @@ export interface StorageGrid {
   mask: (0 | 1)[];
 }
 
-export interface StorageFrame {
+export interface RasterFrame {
   date: string;
   values: (number | null)[];
 }
 
-export interface StorageAnalysisResult {
+export interface RasterAnalysisResult {
   version: number;
   title: string;
   code: string;
@@ -95,10 +93,9 @@ export interface StorageAnalysisResult {
   aquiferName: string;
   regionId: string;
   dataType: string;
-  params: StorageAnalysisParams;
-  grid: StorageGrid;
-  frames: StorageFrame[];
-  storageSeries: { date: string; value: number }[];
+  params: RasterAnalysisParams;
+  grid: RasterGrid;
+  frames: RasterFrame[];
   createdAt: string;
 }
 
@@ -112,7 +109,7 @@ export interface CrossSectionProfile {
   elevationRange: [number, number]; // [min, max] across all frames
 }
 
-export interface StorageAnalysisMeta {
+export interface RasterAnalysisMeta {
   title: string;
   code: string;
   aquiferId: string;
@@ -120,6 +117,6 @@ export interface StorageAnalysisMeta {
   regionId: string;
   filePath: string;
   dataType: string;
-  params: StorageAnalysisParams;
+  params: RasterAnalysisParams;
   createdAt: string;
 }

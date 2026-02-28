@@ -1,4 +1,4 @@
-import { StorageGrid, StorageFrame, CrossSectionProfile } from '../types';
+import { RasterGrid, RasterFrame, CrossSectionProfile } from '../types';
 import { haversineDistance } from './geo';
 
 const NUM_SAMPLES = 200;
@@ -9,8 +9,8 @@ const NUM_SAMPLES = 200;
 export function sampleCrossSection(
   start: { lat: number; lng: number },
   end: { lat: number; lng: number },
-  grid: StorageGrid,
-  frames: StorageFrame[],
+  grid: RasterGrid,
+  frames: RasterFrame[],
   lengthUnit: 'ft' | 'm'
 ): CrossSectionProfile {
   const totalMeters = haversineDistance(start.lat, start.lng, end.lat, end.lng);

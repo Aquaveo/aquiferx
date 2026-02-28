@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import L from 'leaflet';
 import { Play, Pause, X, ChevronDown } from 'lucide-react';
-import { StorageAnalysisResult, CrossSectionProfile } from '../types';
+import { RasterAnalysisResult, CrossSectionProfile } from '../types';
 import { sampleCrossSection } from '../utils/rasterSampling';
 
 // --- Color ramp system ---
@@ -203,17 +203,18 @@ function generateContourLines(
   return results;
 }
 
-interface StorageOverlayProps {
-  analysis: StorageAnalysisResult;
+interface RasterOverlayProps {
+  analysis: RasterAnalysisResult;
   map: L.Map;
   onClose: () => void;
   onFrameChange?: (date: string, dateTs: number) => void;
   lengthUnit: 'ft' | 'm';
   onCrossSectionChange?: (profile: CrossSectionProfile | null) => void;
+  dataTypeName?: string;
 }
 
-const StorageOverlay: React.FC<StorageOverlayProps> = ({
-  analysis, map, onClose, onFrameChange, lengthUnit, onCrossSectionChange
+const RasterOverlay: React.FC<RasterOverlayProps> = ({
+  analysis, map, onClose, onFrameChange, lengthUnit, onCrossSectionChange, dataTypeName
 }) => {
   const [frameIdx, setFrameIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -591,7 +592,7 @@ const StorageOverlay: React.FC<StorageOverlayProps> = ({
             onClick={() => setShowRampPicker(!showRampPicker)}
             className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2 hover:text-slate-900 transition-colors"
           >
-            <span>WTE</span>
+            <span>{dataTypeName || analysis.dataType.toUpperCase()}</span>
             <ChevronDown size={12} className={`text-slate-400 transition-transform ${showRampPicker ? 'rotate-180' : ''}`} />
           </button>
 
@@ -708,4 +709,4 @@ const StorageOverlay: React.FC<StorageOverlayProps> = ({
   );
 };
 
-export default StorageOverlay;
+export default RasterOverlay;

@@ -4,9 +4,9 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell
 } from 'recharts';
-import { Aquifer, Region, Well, Measurement, StorageAnalysisResult, StorageAnalysisParams } from '../types';
+import { Aquifer, Region, Well, Measurement, DataType, RasterAnalysisResult, RasterAnalysisParams } from '../types';
 import { interpolatePCHIP } from '../utils/interpolation';
-import { runStorageAnalysis } from '../services/storageAnalysis';
+import { runRasterAnalysis } from '../services/rasterAnalysis';
 import { slugify } from '../utils/strings';
 
 const PREVIEW_COLORS = [
@@ -15,14 +15,15 @@ const PREVIEW_COLORS = [
   '#a855f7', '#22c55e', '#eab308', '#0ea5e9',
 ];
 
-interface StorageAnalysisDialogProps {
+interface SpatialAnalysisDialogProps {
   aquifer: Aquifer;
   region: Region;
   wells: Well[];
   measurements: Measurement[];
+  dataType: DataType;
   existingCodes: string[];
   onClose: () => void;
-  onComplete: (result: StorageAnalysisResult) => void;
+  onComplete: (result: RasterAnalysisResult) => void;
 }
 
 type Step = 'options' | 'running' | 'complete';
@@ -216,21 +217,19 @@ const PchipPreviewCanvas: React.FC<{
   );
 };
 
-const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
-  aquifer, region, wells, measurements, existingCodes, onClose, onComplete,
+const SpatialAnalysisDialog: React.FC<SpatialAnalysisDialogProps> = ({
+  aquifer, region, wells, measurements, dataType, existingCodes, onClose, onComplete,
 }) => {
   const [step, setStep] = useState<Step>('options');
   const [progressText, setProgressText] = useState('');
   const [progressPct, setProgressPct] = useState(0);
-  const [result, setResult] = useState<StorageAnalysisResult | null>(null);
+  const [result, setResult] = useState<RasterAnalysisResult | null>(null);
   const cancelledRef = useRef(false);
 
   // Options state
   const [title, setTitle] = useState('');
   const [resolution, setResolution] = useState(50);
-  const [storageCoeff, setStorageCoeff] = useState(0.15);
   const [interval, setInterval] = useState<'3months' | '6months' | '1year'>('1year');
-  const [volumeUnit, setVolumeUnit] = useState(region.lengthUnit === 'ft' ? 'acre-ft' : 'MCM');
   const [minObs, setMinObs] = useState(5);
   const [minSpanYears, setMinSpanYears] = useState(5);
   const [smoothingMethod, setSmoothingMethod] = useState<'pchip' | 'moving-average'>('pchip');
@@ -239,10 +238,10 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
   // Build well ID set for fast lookup
   const wellIdSet = useMemo(() => new Set(wells.map(w => w.id)), [wells]);
 
-  // Compute WTE measurements for this aquifer
+  // Compute measurements for the target data type in this aquifer
   const wteMeasurements = useMemo(() =>
-    measurements.filter(m => m.dataType === 'wte' && wellIdSet.has(m.wellId)),
-  [measurements, wellIdSet]);
+    measurements.filter(m => m.dataType === dataType.code && wellIdSet.has(m.wellId)),
+  [measurements, wellIdSet, dataType.code]);
 
   // Data density analysis: 6-month bins
   const { densityData, defaultStartDate, defaultEndDate } = useMemo(() => {
@@ -324,24 +323,20 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
   const hasConflict = existingCodes.includes(code);
   const canRun = title.trim().length > 0 && !hasConflict && startDate && endDate && startDate < endDate && wells.length > 0;
 
-  const volumeOptions = region.lengthUnit === 'ft'
-    ? [{ value: 'acre-ft', label: 'acre-ft' }, { value: 'ft3', label: 'ft\u00B3' }]
-    : [{ value: 'm3', label: 'm\u00B3' }, { value: 'MCM', label: 'MCM' }, { value: 'km3', label: 'km\u00B3' }];
-
   const handleRun = async () => {
     cancelledRef.current = false;
     setStep('running');
 
-    const params: StorageAnalysisParams = {
-      startDate, endDate, resolution, storageCoefficient: storageCoeff,
-      interval, volumeUnit, title,
+    const params: RasterAnalysisParams = {
+      startDate, endDate, resolution,
+      interval, title,
       minObservations: minObs, minTimeSpanYears: minSpanYears,
       smoothingMethod, smoothingMonths,
     };
 
     try {
-      const result = await runStorageAnalysis(
-        params, aquifer, region, wells,
+      const result = await runRasterAnalysis(
+        params, dataType.code, aquifer, region, wells,
         measurements.filter(m => wellIdSet.has(m.wellId)),
         (stepText, pct) => {
           if (!cancelledRef.current) {
@@ -355,7 +350,7 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
         setStep('complete');
       }
     } catch (err) {
-      console.error('Storage analysis failed:', err);
+      console.error('Raster analysis failed:', err);
       setProgressText(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
@@ -413,7 +408,7 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
           <div>
-            <h2 className="text-lg font-bold text-slate-800">Analyze Aquifer Storage</h2>
+            <h2 className="text-lg font-bold text-slate-800">Build Spatial Raster</h2>
             <p className="text-sm text-slate-500">{aquifer.name} &mdash; {region.name}</p>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-lg transition-colors">
@@ -429,7 +424,7 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
               {wteMeasurements.length > 0 && (
                 <div>
                   <h3 className="text-sm font-semibold text-slate-700 mb-1">
-                    WTE Time Series Preview ({usableWellCount} wells with 2+ observations)
+                    {dataType.name} Time Series Preview ({usableWellCount} wells with 2+ observations)
                   </h3>
                   <div className="h-[180px] bg-slate-50 rounded-lg border border-slate-200">
                     <PchipPreviewCanvas
@@ -499,12 +494,6 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
                     className="w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Storage Coefficient</label>
-                  <input type="number" value={storageCoeff} min={0.001} max={1} step={0.01}
-                    onChange={e => setStorageCoeff(parseFloat(e.target.value) || 0.15)}
-                    className="w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-                </div>
-                <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Min Observations / Well</label>
                   <input type="number" value={minObs} min={2} max={100} step={1}
                     onChange={e => setMinObs(Math.max(2, parseInt(e.target.value) || 5))}
@@ -534,13 +523,6 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Volume Units</label>
-                  <select value={volumeUnit} onChange={e => setVolumeUnit(e.target.value)}
-                    className="w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
-                    {volumeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </div>
-                <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Interpolation Method</label>
                   <select value={smoothingMethod} onChange={e => setSmoothingMethod(e.target.value as any)}
                     className="w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
@@ -567,7 +549,7 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
                     className="w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
                   {title && (
                     <div className="mt-1 flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400">{slugify(aquifer.name)}/raster_wte_{code}.json</span>
+                      <span className="text-[10px] text-slate-400">{slugify(aquifer.name)}/raster_{dataType.code}_{code}.json</span>
                       {hasConflict && <span className="text-[10px] text-red-500 font-medium">Name already exists</span>}
                     </div>
                   )}
@@ -633,4 +615,4 @@ const StorageAnalysisDialog: React.FC<StorageAnalysisDialogProps> = ({
   );
 };
 
-export default StorageAnalysisDialog;
+export default SpatialAnalysisDialog;

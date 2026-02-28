@@ -1,5 +1,5 @@
-import { Aquifer, Region, Well, Measurement, StorageAnalysisParams, StorageAnalysisResult, StorageGrid, StorageFrame } from '../types';
-import { isPointInGeoJSON, cellAreaM2 } from '../utils/geo';
+import { Aquifer, Region, Well, Measurement, RasterAnalysisParams, RasterAnalysisResult, RasterGrid, RasterFrame } from '../types';
+import { isPointInGeoJSON } from '../utils/geo';
 import { interpolatePCHIP, kernelSmooth } from '../utils/interpolation';
 import { krigGrid, estimateVariogramParams } from './kriging';
 import { slugify } from '../utils/strings';
@@ -24,33 +24,17 @@ function generateIntervalDates(startDate: string, endDate: string, interval: '3m
   return dates;
 }
 
-// Convert volume from base units (lengthUnit * m^2) to target volume unit
-function convertVolume(volumeBaseM2: number, lengthUnit: 'ft' | 'm', volumeUnit: string): number {
-  if (lengthUnit === 'ft') {
-    // volumeBaseM2 is in ft * m^2, convert m^2 to ft^2
-    const volumeFt3 = volumeBaseM2 * 10.7639;
-    if (volumeUnit === 'ft3') return volumeFt3;
-    if (volumeUnit === 'acre-ft') return volumeFt3 / 43560;
-    return volumeFt3;
-  } else {
-    // volumeBaseM2 is in m * m^2 = m^3
-    const volumeM3 = volumeBaseM2;
-    if (volumeUnit === 'm3') return volumeM3;
-    if (volumeUnit === 'MCM') return volumeM3 / 1e6;
-    if (volumeUnit === 'km3') return volumeM3 / 1e9;
-    return volumeM3;
-  }
-}
 
-export async function runStorageAnalysis(
-  params: StorageAnalysisParams,
+export async function runRasterAnalysis(
+  params: RasterAnalysisParams,
+  dataType: string,
   aquifer: Aquifer,
   region: Region,
   wells: Well[],
   measurements: Measurement[],
   onProgress: (step: string, pct: number) => void
-): Promise<StorageAnalysisResult> {
-  const { startDate, endDate, resolution, storageCoefficient, interval, volumeUnit, title } = params;
+): Promise<RasterAnalysisResult> {
+  const { startDate, endDate, resolution, interval, title } = params;
 
   // Step 1: Build grid
   onProgress('Building grid...', 0);
@@ -84,8 +68,8 @@ export async function runStorageAnalysis(
   const intervalTimestamps = intervalDates.map(d => new Date(d).getTime());
 
   // Step 3: PCHIP per well
-  // Group WTE measurements by well
-  const wteMeasurements = measurements.filter(m => m.dataType === 'wte');
+  // Group measurements by well for the target data type
+  const wteMeasurements = measurements.filter(m => m.dataType === dataType);
   const byWell = new Map<string, Measurement[]>();
   for (const m of wteMeasurements) {
     if (!byWell.has(m.wellId)) byWell.set(m.wellId, []);
@@ -146,7 +130,7 @@ export async function runStorageAnalysis(
     wellInterp.set(wellId, { well, values: interpValues });
   }
 
-  console.log(`[StorageAnalysis] ${wellInterp.size}/${wellIds.length} wells qualified (minObs=${params.minObservations}, minSpan=${params.minTimeSpanYears}yr)`);
+  console.log(`[RasterAnalysis] ${wellInterp.size}/${wellIds.length} wells qualified (minObs=${params.minObservations}, minSpan=${params.minTimeSpanYears}yr)`);
 
   // Step 3b: Kernel smoothing (when selected)
   if (params.smoothingMethod === 'moving-average') {
@@ -193,10 +177,10 @@ export async function runStorageAnalysis(
   }
 
   const variogramParams = estimateVariogramParams(allWellLats, allWellLngs, allWellMeanValues);
-  console.log(`[StorageAnalysis] Using single variogram for all ${intervalDates.length} timesteps, ${allWellLats.length} wells total`);
+  console.log(`[RasterAnalysis] Using single variogram for all ${intervalDates.length} timesteps, ${allWellLats.length} wells total`);
 
   // Step 5: Krig per timestep using the shared variogram
-  const frames: StorageFrame[] = [];
+  const frames: RasterFrame[] = [];
 
   for (let ti = 0; ti < intervalDates.length; ti++) {
     onProgress(`Kriging timestep ${ti + 1}/${intervalDates.length}...`, 30 + (ti / intervalDates.length) * 50);
@@ -216,7 +200,7 @@ export async function runStorageAnalysis(
       }
     }
 
-    console.log(`[StorageAnalysis] Timestep ${intervalDates[ti]}: ${activeValues.length} wells, values [${Math.min(...activeValues).toFixed(1)}, ${Math.max(...activeValues).toFixed(1)}]`);
+    console.log(`[RasterAnalysis] Timestep ${intervalDates[ti]}: ${activeValues.length} wells, values [${Math.min(...activeValues).toFixed(1)}, ${Math.max(...activeValues).toFixed(1)}]`);
 
     let gridValues: (number | null)[];
     if (activeValues.length >= 2) {
@@ -231,61 +215,23 @@ export async function runStorageAnalysis(
     frames.push({ date: intervalDates[ti], values: gridValues });
   }
 
-  // Step 5: Compute storage volumes
-  onProgress('Computing storage volumes...', 85);
-  await yieldToUI();
-
-  const storageSeries: { date: string; value: number }[] = [];
-  let cumulativeVolume = 0;
-
-  // First entry: zero change
-  if (frames.length > 0) {
-    storageSeries.push({ date: frames[0].date, value: 0 });
-  }
-
-  for (let fi = 1; fi < frames.length; fi++) {
-    const prevFrame = frames[fi - 1];
-    const currFrame = frames[fi];
-    let volumeChange = 0;
-
-    for (let ci = 0; ci < mask.length; ci++) {
-      if (mask[ci] === 0) continue;
-      const prevVal = prevFrame.values[ci];
-      const currVal = currFrame.values[ci];
-      if (prevVal === null || currVal === null) continue;
-
-      const dh = currVal - prevVal; // change in water level
-      const row = Math.floor(ci / nx);
-      const cellLat = gridLats[ci];
-      const areaSqM = cellAreaM2(cellLat, dx, dy);
-
-      // dh is in lengthUnit, area is in m^2
-      volumeChange += dh * areaSqM * storageCoefficient;
-    }
-
-    // Convert volume units
-    cumulativeVolume += convertVolume(volumeChange, region.lengthUnit, volumeUnit);
-    storageSeries.push({ date: currFrame.date, value: cumulativeVolume });
-  }
-
-  onProgress('Saving results...', 95);
+  onProgress('Saving results...', 85);
   await yieldToUI();
 
   // Step 6: Assemble result
   const code = slugify(title);
 
-  const result: StorageAnalysisResult = {
+  const result: RasterAnalysisResult = {
     version: 1,
     title,
     code,
     aquiferId: aquifer.id,
     aquiferName: aquifer.name,
     regionId: region.id,
-    dataType: 'wte',
+    dataType,
     params,
     grid: { minLng, minLat, dx, dy, nx, ny, mask },
     frames,
-    storageSeries,
     createdAt: new Date().toISOString(),
   };
 
@@ -296,7 +242,7 @@ export async function runStorageAnalysis(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       files: [{
-        path: `${region.id}/${aquiferSlug}/raster_wte_${code}.json`,
+        path: `${region.id}/${aquiferSlug}/raster_${dataType}_${code}.json`,
         content: JSON.stringify(result),
       }]
     }),

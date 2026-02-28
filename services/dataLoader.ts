@@ -1,6 +1,6 @@
 import shp from 'shpjs';
 import polylabel from 'polylabel';
-import { Region, Aquifer, Well, Measurement, RegionMeta, StorageAnalysisMeta } from '../types';
+import { Region, Aquifer, Well, Measurement, RegionMeta, RasterAnalysisMeta } from '../types';
 import { freshFetch } from './importUtils';
 
 interface DataFolder {
@@ -372,7 +372,7 @@ export async function loadAllData(): Promise<{
   aquifers: Aquifer[];
   wells: Well[];
   measurements: Measurement[];
-  storageMeta: StorageAnalysisMeta[];
+  storageMeta: RasterAnalysisMeta[];
 }> {
   const regionMetas = await loadRegionManifest();
 
@@ -380,7 +380,7 @@ export async function loadAllData(): Promise<{
   const allAquifers: Aquifer[] = [];
   const allWells: Well[] = [];
   const allMeasurements: Measurement[] = [];
-  const allStorageMeta: StorageAnalysisMeta[] = [];
+  const allStorageMeta: RasterAnalysisMeta[] = [];
 
   for (const meta of regionMetas) {
     const folderPath = `/data/${meta.id}`;
@@ -422,7 +422,7 @@ export async function loadAllData(): Promise<{
     try {
       const storageRes = await freshFetch(`/api/list-rasters?region=${encodeURIComponent(meta.id)}`);
       if (storageRes.ok) {
-        const items: StorageAnalysisMeta[] = await storageRes.json();
+        const items: RasterAnalysisMeta[] = await storageRes.json();
         for (const item of items) allStorageMeta.push(item);
       }
     } catch (e) {
