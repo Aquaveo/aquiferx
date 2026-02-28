@@ -598,10 +598,12 @@ const App: React.FC = () => {
     } else {
       setSelectedWells([well]);
     }
+    setActiveTimeSeriesTab('waterLevel');
   };
 
   const handleWellBoxSelect = (wells: Well[]) => {
     setSelectedWells(wells);
+    setActiveTimeSeriesTab('waterLevel');
   };
 
   // --- Region/Aquifer rename & delete handlers ---
@@ -1394,7 +1396,7 @@ const App: React.FC = () => {
                       ) : effectiveTab === 'storageChange' ? (
                         <div className="flex items-center gap-3">
                           <label className="flex items-center gap-1.5 text-xs text-slate-600 select-none">
-                            <span className="font-medium">Sc</span>
+                            <span className="font-medium">Storage Coeff.</span>
                             <button
                               onClick={() => setStorageCoeff(Math.max(0.01, +(storageCoeff - 0.05).toFixed(2)))}
                               disabled={storageCoeff <= 0.01}
