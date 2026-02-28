@@ -165,11 +165,12 @@ export function idwGrid(
   };
   const tree = new kdTree<ProjectedPoint>(treePoints, distFn, ['x', 'y']);
 
-  // Pre-compute nodal function coefficients for each scatter point
-  // For 'classic', Q_i(x) = f_i (constant)
-  // For 'gradient', Q_i(x) = f_i + fx*(x-xi) + fy*(y-yi)
-  // For 'quadratic', Q_i(x) = f_i + a2*dx + a3*dy + a4*dx^2 + a5*dx*dy + a6*dy^2
+  // Pre-compute nodal function coefficients for each scatter point.
+  // Each well also gets its own radius of influence R_w (distance to farthest
+  // fitting neighbor). Beyond R_w, the nodal function falls back to f_i to
+  // prevent wild extrapolation of gradient/quadratic surfaces.
   const nodalCoeffs: (number[] | null)[] = new Array(nWells).fill(null);
+  const nodalRadius: number[] = new Array(nWells).fill(Infinity);
 
   if (nodalFn !== 'classic') {
     // For each well, find its k nearest neighbors and fit nodal function
@@ -177,40 +178,62 @@ export function idwGrid(
     for (let i = 0; i < nWells; i++) {
       const query = { x: wellXs[i], y: wellYs[i], idx: i };
       const nearest = tree.nearest(query, k + 1); // includes self
-      const nx: number[] = [], ny: number[] = [], nv: number[] = [], nw: number[] = [];
+
+      // Collect neighbors (excluding self) and track max distance (R_w)
+      const neighX: number[] = [], neighY: number[] = [], neighV: number[] = [];
+      const neighDist: number[] = [];
+      let Rw = 0;
       for (const [pt, dist] of nearest) {
         if (pt.idx === i) continue;
-        nx.push(wellXs[pt.idx]);
-        ny.push(wellYs[pt.idx]);
-        nv.push(wellValues[pt.idx]);
-        // Weight by 1/dist^exponent for the fitting
-        const w = dist > 1e-10 ? 1 / Math.pow(dist, exponent) : 1e10;
-        nw.push(w);
+        neighX.push(wellXs[pt.idx]);
+        neighY.push(wellYs[pt.idx]);
+        neighV.push(wellValues[pt.idx]);
+        neighDist.push(dist);
+        if (dist > Rw) Rw = dist;
       }
 
+      nodalRadius[i] = Rw;
+
+      // Compute fitting weights using modified Shepard formula: ((Rw - d) / (Rw * d))^2
+      // This gives high weight to close neighbors and zero at the boundary,
+      // consistent with the interpolation weighting.
+      const neighW: number[] = neighDist.map(d => {
+        if (d < 1e-10) return 1e10;
+        if (d >= Rw) return 0;
+        const ratio = (Rw - d) / (Rw * d);
+        return ratio * ratio;
+      });
+
       if (nodalFn === 'quadratic') {
-        const qCoeffs = fitQuadratic(wellXs[i], wellYs[i], wellValues[i], nx, ny, nv, nw);
+        const qCoeffs = fitQuadratic(wellXs[i], wellYs[i], wellValues[i], neighX, neighY, neighV, neighW);
         if (qCoeffs) {
           nodalCoeffs[i] = qCoeffs;
         } else {
           // Fall back to gradient
-          const gCoeffs = fitGradientPlane(wellXs[i], wellYs[i], wellValues[i], nx, ny, nv, nw);
+          const gCoeffs = fitGradientPlane(wellXs[i], wellYs[i], wellValues[i], neighX, neighY, neighV, neighW);
           nodalCoeffs[i] = gCoeffs ? [...gCoeffs, 0, 0, 0] : null;
         }
       } else {
-        const gCoeffs = fitGradientPlane(wellXs[i], wellYs[i], wellValues[i], nx, ny, nv, nw);
+        const gCoeffs = fitGradientPlane(wellXs[i], wellYs[i], wellValues[i], neighX, neighY, neighV, neighW);
         nodalCoeffs[i] = gCoeffs ? [...gCoeffs] : null;
       }
     }
   }
 
-  // Evaluate nodal function Q_i at a point (px, py)
+  // Evaluate nodal function Q_i at a point (px, py).
+  // Falls back to f_i if the point is beyond the well's fitting radius.
   function evalNodal(i: number, px: number, py: number): number {
     const fi = wellValues[i];
     const coeffs = nodalCoeffs[i];
     if (!coeffs) return fi; // fall back to classic
+
     const dx = px - wellXs[i];
     const dy = py - wellYs[i];
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Beyond the fitting radius, the nodal function is unreliable — use constant
+    if (dist > nodalRadius[i]) return fi;
+
     if (coeffs.length === 2) {
       // Gradient: fi + fx*dx + fy*dy
       return fi + coeffs[0] * dx + coeffs[1] * dy;
@@ -270,12 +293,13 @@ export function idwGrid(
     for (const d of activeDists) if (d > R) R = d;
     if (R < 1e-10) R = 1; // safety
 
-    // Modified Shepard weights: ((R - h) / (R * h))^exponent
+    // Modified Shepard weights: ((R - h) / (R * h))^p, normalized to sum to 1
+    // Points at or beyond R get zero weight
     let sumW = 0;
     let sumWQ = 0;
     for (let k = 0; k < activeIndices.length; k++) {
       const h = activeDists[k];
-      if (h >= R && activeIndices.length > 1) continue; // beyond farthest neighbor
+      if (h >= R) continue; // zero weight beyond R
       const w = Math.pow((R - h) / (R * h), exponent);
       const q = evalNodal(activeIndices[k], gx, gy);
       sumW += w;
