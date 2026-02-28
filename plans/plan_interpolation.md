@@ -248,3 +248,4 @@ When we list the rasters in the application in the UI panel on the left, we shou
 - **Delete** — Delete the raster file and remove it from the listing. Show a confirmation dialog before deleting to prevent accidental deletions. (Already partially implemented in the current sidebar.)
 
 - **Get Info** — Show a modal dialog displaying the options that were used to generate the raster (read from the `options` object in the JSON file), along with the `generatedAt` timestamp. For any rasters that lack saved options (pre-existing rasters), show "N/A" for the options fields.
+
