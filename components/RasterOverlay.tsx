@@ -211,10 +211,13 @@ interface RasterOverlayProps {
   lengthUnit: 'ft' | 'm';
   onCrossSectionChange?: (profile: CrossSectionProfile | null) => void;
   dataTypeName?: string;
+  showActiveWells: boolean;
+  onToggleActiveWells: () => void;
 }
 
 const RasterOverlay: React.FC<RasterOverlayProps> = ({
-  analysis, map, onClose, onFrameChange, lengthUnit, onCrossSectionChange, dataTypeName
+  analysis, map, onClose, onFrameChange, lengthUnit, onCrossSectionChange, dataTypeName,
+  showActiveWells, onToggleActiveWells
 }) => {
   const [frameIdx, setFrameIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -691,6 +694,17 @@ const RasterOverlay: React.FC<RasterOverlayProps> = ({
           }`}
         >
           {hasCrossSection ? 'Clear' : 'Cross Section'}
+        </button>
+
+        <button
+          onClick={onToggleActiveWells}
+          className={`px-3 py-1.5 rounded-lg shadow-lg border text-xs font-medium transition-colors ${
+            showActiveWells
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+              : 'bg-white/95 backdrop-blur text-slate-700 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          Active Wells
         </button>
       </div>
 

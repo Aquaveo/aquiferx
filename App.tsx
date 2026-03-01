@@ -219,6 +219,7 @@ const App: React.FC = () => {
   const [crossSectionProfile, setCrossSectionProfile] = useState<CrossSectionProfile | null>(null);
   const [activeTimeSeriesTab, setActiveTimeSeriesTab] = useState<'waterLevel' | 'storageChange' | 'crossSection'>('waterLevel');
   const [rasterFrameDate, setRasterFrameDate] = useState<{ date: string; dateTs: number } | null>(null);
+  const [showActiveWells, setShowActiveWells] = useState(false);
   const [storageCoeff, setStorageCoeff] = useState(0.1);
   const [storageVolumeUnit, setStorageVolumeUnit] = useState('');
   const [chartHeight, setChartHeight] = useState(250);
@@ -574,7 +575,7 @@ const App: React.FC = () => {
 
   // Compute which wells are active contributors for the current raster frame
   const rasterActiveWellIds = useMemo<Set<string> | null>(() => {
-    if (!rasterResult || !rasterFrameDate) return null;
+    if (!showActiveWells || !rasterResult || !rasterFrameDate) return null;
 
     const opts = rasterResult.options;
     const dataType = rasterResult.dataType;
@@ -609,7 +610,7 @@ const App: React.FC = () => {
     }
 
     return active;
-  }, [rasterResult, rasterFrameDate, filteredWells, measurements]);
+  }, [showActiveWells, rasterResult, rasterFrameDate, filteredWells, measurements]);
 
   const allRasterResults = useMemo(() => {
     if (!rasterResult) return [];
@@ -1314,11 +1315,13 @@ const App: React.FC = () => {
               <RasterOverlay
                 analysis={rasterResult}
                 map={mapViewRef.current.getMap()!}
-                onClose={() => setRasterResult(null)}
+                onClose={() => { setRasterResult(null); setShowActiveWells(false); }}
                 onFrameChange={handleRasterFrameChange}
                 lengthUnit={selectedRegion?.lengthUnit || 'ft'}
                 onCrossSectionChange={handleCrossSectionChange}
                 dataTypeName={activeDataType.name}
+                showActiveWells={showActiveWells}
+                onToggleActiveWells={() => setShowActiveWells(v => !v)}
               />
             )}
           </div>
