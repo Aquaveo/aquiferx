@@ -699,7 +699,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
           {showSmooth && smoothData && wellIds.map((wellId) => {
             if (!smoothData.has(wellId)) return null;
             const key = `smooth_${wellId}`;
-            const label = `${smoothMonths}-mo smooth`;
+            const label = `${smoothMonths}-mo MAvg`;
             return (
               <Line
                 key={key}

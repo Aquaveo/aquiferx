@@ -1440,7 +1440,7 @@ const App: React.FC = () => {
                           </label>
                           <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
                             <input type="checkbox" checked={showSmooth} onChange={(e) => setShowSmooth(e.target.checked)} className="accent-blue-500" />
-                            Smooth
+                            MAvg
                           </label>
                           {showSmooth && (
                             <label className="flex items-center gap-1 text-xs text-slate-600 select-none">
