@@ -353,7 +353,8 @@ export async function loadMeasurements(regionPath: string, regionId: string, dat
             date,
             value,
             dataType: dt.code,
-            aquiferId
+            aquiferId,
+            regionId
           });
         }
       }

@@ -261,13 +261,13 @@ const SpatialAnalysisDialog: React.FC<SpatialAnalysisDialogProps> = ({
   // --- Title (Step 3) ---
   const [title, setTitle] = useState('');
 
-  // Build well ID set for fast lookup
-  const wellIdSet = useMemo(() => new Set(wells.map(w => w.id)), [wells]);
+  // Build well key set for fast lookup (regionId:aquiferId:wellId for global uniqueness)
+  const wellKeySet = useMemo(() => new Set(wells.map(w => `${w.regionId}:${w.aquiferId}:${w.id}`)), [wells]);
 
   // Compute measurements for the target data type in this aquifer
   const wteMeasurements = useMemo(() =>
-    measurements.filter(m => m.dataType === dataType.code && wellIdSet.has(m.wellId)),
-  [measurements, wellIdSet, dataType.code]);
+    measurements.filter(m => m.dataType === dataType.code && wellKeySet.has(`${m.regionId}:${m.aquiferId}:${m.wellId}`)),
+  [measurements, wellKeySet, dataType.code]);
 
   // Check if any values are non-positive (disables log interpolation)
   const hasNonPositiveValues = useMemo(() => {
@@ -419,7 +419,7 @@ const SpatialAnalysisDialog: React.FC<SpatialAnalysisDialogProps> = ({
     try {
       const result = await runRasterAnalysis(
         input, dataType.code, aquifer, region, wells,
-        measurements.filter(m => wellIdSet.has(m.wellId)),
+        measurements.filter(m => wellKeySet.has(`${m.regionId}:${m.aquiferId}:${m.wellId}`)),
         (stepText, pct) => {
           if (!cancelledRef.current) {
             setProgressText(stepText);

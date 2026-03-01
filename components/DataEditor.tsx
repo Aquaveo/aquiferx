@@ -59,7 +59,7 @@ const DataEditor: React.FC<DataEditorProps> = ({ well, measurements, allMeasurem
     setIsSaving(true);
     try {
       const survivingRows = rows.filter((_, i) => !deletedIndices.has(i));
-      const otherMeasurements = allMeasurements.filter(m => !(m.wellId === well.id && m.dataType === dataType.code));
+      const otherMeasurements = allMeasurements.filter(m => !(m.wellId === well.id && m.regionId === well.regionId && m.aquiferId === well.aquiferId && m.dataType === dataType.code));
       const updatedAll = [...otherMeasurements, ...survivingRows];
       onSave(updatedAll);
       onClose();

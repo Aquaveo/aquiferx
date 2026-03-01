@@ -50,6 +50,7 @@ export interface Measurement {
   value: number; // Measurement value (e.g. Water Table Elevation)
   dataType: string; // Data type code (e.g. 'wte')
   aquiferId: string;
+  regionId: string;
 }
 
 export interface ChartPoint {

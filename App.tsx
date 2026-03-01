@@ -341,15 +341,16 @@ const App: React.FC = () => {
     const cutoffTime = Date.now() - windowYears * MS_PER_YEAR;
     const regionWells = wells.filter(w => w.regionId === selectedRegion.id);
 
-    // Group measurements by wellId for this data type, filtered by window
+    // Group measurements by regionId:aquiferId:wellId for this data type, filtered by window
     const byWell = new Map<string, Measurement[]>();
     for (const m of measurements) {
       if (m.dataType === selectedDataType) {
         const t = new Date(m.date).getTime();
         if (!isNaN(t) && t >= cutoffTime) {
-          const arr = byWell.get(m.wellId);
+          const key = `${m.regionId}:${m.aquiferId}:${m.wellId}`;
+          const arr = byWell.get(key);
           if (arr) arr.push(m);
-          else byWell.set(m.wellId, [m]);
+          else byWell.set(key, [m]);
         }
       }
     }
@@ -358,7 +359,7 @@ const App: React.FC = () => {
     const wellThresholds = selectedRegion.lengthUnit === 'm' ? TREND_THRESHOLDS_M : TREND_THRESHOLDS_FT;
     const wellColorMap = new Map<string, string>();
     for (const w of regionWells) {
-      wellColorMap.set(w.id, classifySlope(computeSlope(byWell.get(w.id) || []), wellThresholds));
+      wellColorMap.set(w.id, classifySlope(computeSlope(byWell.get(`${w.regionId}:${w.aquiferId}:${w.id}`) || []), wellThresholds));
     }
 
     // Per-aquifer colors (median of well slopes)
@@ -569,7 +570,7 @@ const App: React.FC = () => {
 
   const selectedWellMeasurements = useMemo(() =>
     selectedWells.length > 0
-      ? measurements.filter(m => selectedWells.some(w => w.id === m.wellId) && m.dataType === selectedDataType)
+      ? measurements.filter(m => selectedWells.some(w => w.id === m.wellId && w.regionId === m.regionId && w.aquiferId === m.aquiferId) && m.dataType === selectedDataType)
       : [],
   [selectedWells, measurements, selectedDataType]);
 
@@ -587,7 +588,7 @@ const App: React.FC = () => {
     for (const w of filteredWells) {
       const times: number[] = [];
       for (const m of measurements) {
-        if (m.wellId !== w.id || m.dataType !== dataType) continue;
+        if (m.wellId !== w.id || m.regionId !== w.regionId || m.aquiferId !== w.aquiferId || m.dataType !== dataType) continue;
         const t = new Date(m.date).getTime();
         if (!isNaN(t)) times.push(t);
       }
@@ -818,7 +819,7 @@ const App: React.FC = () => {
     setAquifers(prev => prev.filter(a => a.regionId !== regionId));
     setWells(prev => prev.filter(w => w.regionId !== regionId));
     setMeasurements(prev => prev.filter(m => {
-      const well = wells.find(w => w.id === m.wellId);
+      const well = wells.find(w => w.id === m.wellId && w.regionId === m.regionId && w.aquiferId === m.aquiferId);
       return !well || well.regionId !== regionId;
     }));
     // Delete folder on disk
@@ -905,8 +906,8 @@ const App: React.FC = () => {
     // Compute remaining data for the region before removing from state
     const remainingAquifers = aquifers.filter(a => !(a.id === aquiferId && a.regionId === regionId));
     const remainingWells = wells.filter(w => !(w.aquiferId === aquiferId && w.regionId === regionId));
-    const deletedWellIds = new Set(wells.filter(w => w.aquiferId === aquiferId && w.regionId === regionId).map(w => w.id));
-    const remainingMeasurements = measurements.filter(m => !deletedWellIds.has(m.wellId));
+    const deletedWellKeys = new Set(wells.filter(w => w.aquiferId === aquiferId && w.regionId === regionId).map(w => `${w.regionId}:${w.aquiferId}:${w.id}`));
+    const remainingMeasurements = measurements.filter(m => !deletedWellKeys.has(`${m.regionId}:${m.aquiferId}:${m.wellId}`));
     // Update state
     setAquifers(remainingAquifers);
     setWells(remainingWells);
@@ -914,7 +915,7 @@ const App: React.FC = () => {
     // Rebuild files for the region
     const regionAquifers = remainingAquifers.filter(a => a.regionId === regionId);
     const regionWells = remainingWells.filter(w => w.regionId === regionId);
-    const regionMeasurements = remainingMeasurements.filter(m => regionWells.some(w => w.id === m.wellId));
+    const regionMeasurements = remainingMeasurements.filter(m => regionWells.some(w => w.id === m.wellId && w.regionId === m.regionId && w.aquiferId === m.aquiferId));
     // Aquifers GeoJSON
     const features = regionAquifers.flatMap(a =>
       (a.geojson?.features || []).map((f: any) => ({
@@ -987,8 +988,9 @@ const App: React.FC = () => {
 
   // Chart inline edit/delete handlers
   const handleChartEditMeasurement = async (wellId: string, date: number, newValue: number) => {
+    const well = selectedWells.find(w => w.id === wellId);
     const updatedMeasurements = measurements.map(m =>
-      m.wellId === wellId && new Date(m.date).getTime() === date && m.dataType === selectedDataType
+      m.wellId === wellId && m.regionId === well?.regionId && m.aquiferId === well?.aquiferId && new Date(m.date).getTime() === date && m.dataType === selectedDataType
         ? { ...m, value: newValue }
         : m
     );
@@ -996,8 +998,9 @@ const App: React.FC = () => {
   };
 
   const handleChartDeleteMeasurement = async (wellId: string, date: number) => {
+    const well = selectedWells.find(w => w.id === wellId);
     const updatedMeasurements = measurements.filter(m =>
-      !(m.wellId === wellId && new Date(m.date).getTime() === date && m.dataType === selectedDataType)
+      !(m.wellId === wellId && m.regionId === well?.regionId && m.aquiferId === well?.aquiferId && new Date(m.date).getTime() === date && m.dataType === selectedDataType)
     );
     await handleDataEditorSave(updatedMeasurements);
   };
@@ -1009,11 +1012,9 @@ const App: React.FC = () => {
     const regionId = selectedWells[0].regionId;
     const region = regions.find(r => r.id === regionId);
     const regionWells = wells.filter(w => w.regionId === regionId);
-    const regionWellIds = new Set(regionWells.map(w => w.id));
-
     // Write the CSV for the active data type
     const dtCode = selectedDataType;
-    const regionMeasurements = updatedMeasurements.filter(m => regionWellIds.has(m.wellId) && m.dataType === dtCode);
+    const regionMeasurements = updatedMeasurements.filter(m => m.regionId === regionId && m.dataType === dtCode);
     const header = 'well_id,well_name,date,value,aquifer_id';
     const rows = regionMeasurements.map(m =>
       `${m.wellId},"${m.wellName}",${m.date},${m.value},${m.aquiferId}`

@@ -82,12 +82,13 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
   onWellClick,
   onWellBoxSelect
 }, ref) => {
-  // Count measurements per well for the active data type
+  // Count measurements per well for the active data type (keyed by regionId:aquiferId:wellId)
   const wellMeasurementCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const m of measurements) {
       if (m.dataType === selectedDataType) {
-        counts.set(m.wellId, (counts.get(m.wellId) || 0) + 1);
+        const key = `${m.regionId}:${m.aquiferId}:${m.wellId}`;
+        counts.set(key, (counts.get(key) || 0) + 1);
       }
     }
     return counts;
@@ -344,7 +345,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
     const visible: Well[] = [];
     if (selectedAquifer) {
       wells.forEach(w => {
-        const measurementCount = wellMeasurementCounts.get(w.id) || 0;
+        const measurementCount = wellMeasurementCounts.get(`${w.regionId}:${w.aquiferId}:${w.id}`) || 0;
         if (measurementCount < minObs) return;
         visible.push(w);
         const trendColor = wellColors?.get(w.id);
@@ -393,6 +394,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
   // Update marker styles when selection or raster active wells change — no clearing/recreation
   useEffect(() => {
     const selectedIds = new Set(selectedWells.map(w => w.id));
+    const wellKeyMap = new Map(wells.map(w => [w.id, `${w.regionId}:${w.aquiferId}:${w.id}`]));
     wellMarkerMapRef.current.forEach((marker, wellId) => {
       const isSelected = selectedIds.has(wellId);
       const hasTrend = wellColors?.has(wellId);
@@ -400,7 +402,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
       const rasterFill = rasterActiveWellIds
         ? (rasterActiveWellIds.has(wellId) ? '#22c55e' : '#4b5563')
         : null;
-      const measurementCount = wellMeasurementCounts.get(wellId) || 0;
+      const measurementCount = wellMeasurementCounts.get(wellKeyMap.get(wellId) || '') || 0;
       const defaultFill = measurementCount === 0 ? '#ef4444'
         : measurementCount === 1 ? '#6b7280'
         : '#0000ff';
@@ -411,7 +413,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
         weight: isSelected ? 2 : 1,
       });
     });
-  }, [selectedWells, wellColors, rasterActiveWellIds, wellMeasurementCounts]);
+  }, [selectedWells, wells, wellColors, rasterActiveWellIds, wellMeasurementCounts]);
 
   // Well labels
   useEffect(() => {
