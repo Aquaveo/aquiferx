@@ -124,12 +124,26 @@ export function kernelSmooth(
   }
 
   // Step 1: Nadaraya-Watson kernel regression at each raw measurement timestamp
+  // Use sliding window: beyond 4σ the Gaussian weight is < 0.0003, so skip those points.
+  const cutoff = 4 * sigma;
   const smoothedAtData: number[] = new Array(xValues.length);
   for (let j = 0; j < xValues.length; j++) {
     const t = xValues[j];
     let sumW = 0, sumWY = 0;
-    for (let i = 0; i < xValues.length; i++) {
-      const d = (t - xValues[i]) / sigma;
+    // Scan left from j
+    for (let i = j; i >= 0; i--) {
+      const dt = t - xValues[i];
+      if (dt > cutoff) break;
+      const d = dt / sigma;
+      const w = Math.exp(-0.5 * d * d);
+      sumW += w;
+      sumWY += w * yValues[i];
+    }
+    // Scan right from j+1
+    for (let i = j + 1; i < xValues.length; i++) {
+      const dt = xValues[i] - t;
+      if (dt > cutoff) break;
+      const d = dt / sigma;
       const w = Math.exp(-0.5 * d * d);
       sumW += w;
       sumWY += w * yValues[i];

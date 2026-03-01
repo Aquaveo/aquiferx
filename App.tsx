@@ -376,7 +376,7 @@ const App: React.FC = () => {
       const aqWells = wellsByAquifer.get(a.id) || [];
       const slopes: number[] = [];
       for (const w of aqWells) {
-        const s = computeSlope(byWell.get(w.id) || []);
+        const s = computeSlope(byWell.get(`${w.regionId}:${w.aquiferId}:${w.id}`) || []);
         if (s !== null) slopes.push(s);
       }
       if (slopes.length === 0) {
@@ -568,11 +568,15 @@ const App: React.FC = () => {
     selectedAquifer ? wells.filter(w => w.aquiferId === selectedAquifer.id && w.regionId === selectedAquifer.regionId) : [],
   [selectedAquifer, wells]);
 
+  const selectedWellKeys = useMemo(() =>
+    new Set(selectedWells.map(w => `${w.regionId}:${w.aquiferId}:${w.id}`)),
+  [selectedWells]);
+
   const selectedWellMeasurements = useMemo(() =>
-    selectedWells.length > 0
-      ? measurements.filter(m => selectedWells.some(w => w.id === m.wellId && w.regionId === m.regionId && w.aquiferId === m.aquiferId) && m.dataType === selectedDataType)
+    selectedWellKeys.size > 0
+      ? measurements.filter(m => m.dataType === selectedDataType && selectedWellKeys.has(`${m.regionId}:${m.aquiferId}:${m.wellId}`))
       : [],
-  [selectedWells, measurements, selectedDataType]);
+  [selectedWellKeys, measurements, selectedDataType]);
 
   // Precompute eligible well time ranges once (stable across frames)
   const wellTimeRanges = useMemo<Map<string, [number, number]> | null>(() => {
