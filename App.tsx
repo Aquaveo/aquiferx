@@ -616,6 +616,14 @@ const App: React.FC = () => {
     return [rasterResult, ...compareRasterResults];
   }, [rasterResult, compareRasterResults]);
 
+  // Time range of the active raster (for chart X-axis override)
+  const rasterTimeRange = useMemo<[number, number] | undefined>(() => {
+    if (!rasterResult || rasterResult.frames.length === 0) return undefined;
+    const first = new Date(rasterResult.frames[0].date).getTime();
+    const last = new Date(rasterResult.frames[rasterResult.frames.length - 1].date).getTime();
+    return [first, last];
+  }, [rasterResult]);
+
   // Set default volume unit based on region when raster result loads
   useEffect(() => {
     if (rasterResult && selectedRegion) {
@@ -1545,6 +1553,7 @@ const App: React.FC = () => {
                         onEditMeasurement={handleChartEditMeasurement}
                         onDeleteMeasurement={handleChartDeleteMeasurement}
                         referenceDate={rasterResult && rasterFrameDate ? rasterFrameDate.dateTs : undefined}
+                        rasterTimeRange={rasterTimeRange}
                         trendWindowStart={showTrends ? Date.now() - trendWindowYears * MS_PER_YEAR : undefined}
                       />
                     ) : effectiveTab === 'crossSection' && crossSectionProfile ? (
@@ -1704,6 +1713,7 @@ const App: React.FC = () => {
             onEditMeasurement={handleChartEditMeasurement}
             onDeleteMeasurement={handleChartDeleteMeasurement}
             referenceDate={rasterResult && rasterFrameDate ? rasterFrameDate.dateTs : undefined}
+            rasterTimeRange={rasterTimeRange}
             trendWindowStart={showTrends ? Date.now() - trendWindowYears * MS_PER_YEAR : undefined}
             onEscapeUnhandled={() => setIsChartExpanded(false)}
           />

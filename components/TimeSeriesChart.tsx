@@ -26,6 +26,7 @@ interface TimeSeriesChartProps {
   dataType: DataType;
   lengthUnit?: 'ft' | 'm';
   referenceDate?: number;
+  rasterTimeRange?: [number, number];
   trendWindowStart?: number;
   onEditMeasurement?: (wellId: string, date: number, newValue: number) => void;
   onDeleteMeasurement?: (wellId: string, date: number) => void;
@@ -45,7 +46,7 @@ interface DotPosition extends SelectedPoint {
 
 const HIT_RADIUS = 15;
 
-const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selectedWells, showGSE, showTrendLine, showSmooth, smoothMonths, dataType, lengthUnit = 'ft', referenceDate, trendWindowStart, onEditMeasurement, onDeleteMeasurement, onEscapeUnhandled }) => {
+const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selectedWells, showGSE, showTrendLine, showSmooth, smoothMonths, dataType, lengthUnit = 'ft', referenceDate, rasterTimeRange, trendWindowStart, onEditMeasurement, onDeleteMeasurement, onEscapeUnhandled }) => {
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [editModal, setEditModal] = useState(false);
@@ -555,9 +556,11 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
             type="number"
             domain={zoomLeft != null && zoomRight != null
               ? [zoomLeft, zoomRight]
-              : finalChartData.length > 0
-                ? (() => { const range = (finalChartData[finalChartData.length - 1].date as number) - (finalChartData[0].date as number); const pad = range * 0.02; return [finalChartData[0].date as number - pad, finalChartData[finalChartData.length - 1].date as number + pad]; })()
-                : ['auto', 'auto']}
+              : rasterTimeRange
+                ? (() => { const range = rasterTimeRange[1] - rasterTimeRange[0]; const pad = range * 0.02; return [rasterTimeRange[0] - pad, rasterTimeRange[1] + pad]; })()
+                : finalChartData.length > 0
+                  ? (() => { const range = (finalChartData[finalChartData.length - 1].date as number) - (finalChartData[0].date as number); const pad = range * 0.02; return [finalChartData[0].date as number - pad, finalChartData[finalChartData.length - 1].date as number + pad]; })()
+                  : ['auto', 'auto']}
             allowDataOverflow={zoomLeft != null}
             tickFormatter={formatXAxis}
             stroke="#475569"
