@@ -66,7 +66,7 @@ This is a new method that we need to implement. It will use the inverse distance
 
 The simplest form of inverse distance weighted interpolation is sometimes called **Shepard's method**. The interpolated value is defined as
 
-$F(x,y) = \sum_{i=1}^{n} w_i f_i$,
+$F(x,y) = \sum_{i=1}^{n} w_i f_i$, &emsp;&emsp;**(1)**
 
 where
 
@@ -78,13 +78,13 @@ $w_i$ = the weights assigned to each scatter point.
 
 The classical weight function is
 
-$w_i = \dfrac{h_i^{-p}}{\sum_{j=1}^{n} h_j^{-p}}$,
+$w_i = \dfrac{h_i^{-p}}{\sum_{j=1}^{n} h_j^{-p}}$, &emsp;&emsp;**(2)**
 
 where $p$ is a positive real number called the weighting exponent (commonly $p = 2$).
 
 The distance from the interpolation point $(x,y)$ to scatter point $(x_i,y_i)$ is
 
-$h_i = \sqrt{(x - x_i)^2 + (y - y_i)^2}$.
+$h_i = \sqrt{(x - x_i)^2 + (y - y_i)^2}$. &emsp;&emsp;**(3)**
 
 The weights are normalized so that $\sum_{i=1}^{n} w_i = 1$.
 
@@ -96,7 +96,7 @@ $w_i =
 }{
 \sum_{j=1}^{n}
 \left( \dfrac{R - h_j}{R h_j} \right)^2
-}$,
+}$, &emsp;&emsp;**(4)**
 
 where:
 
@@ -114,29 +114,99 @@ If an interpolation point coincides with a scatter point (i.e., $h_i = 0$), the 
 
 A limitation of Shepard's method is that the interpolating surface is a simple weighted average of the data values of the scatter points and is constrained to lie between the extreme values in the dataset. In other words, the surface does not infer local maxima or minima implicit in the dataset. This problem can be overcome by generalizing the basic form of the equation for Shepard's method in the following manner:
 
-$F(x,y) = \sum_{i=1}^{n} w_i Q_i(x,y)$,
+$F(x,y) = \sum_{i=1}^{n} w_i Q_i(x,y)$, &emsp;&emsp;**(5)**
 
 where $Q_i$ are nodal functions or individual functions defined at each scatter point (Franke 1982; Watson & Philip 1985). The value of an interpolation point is calculated as the weighted average of the values of the nodal functions at that point.
 
 The standard form of Shepard's method can be thought of as a special case where horizontal planes (constants) are used for the nodal functions. The nodal functions can be sloping planes that pass through the scatter point. The equation for the plane is as follows:
 
-$Q_i(x,y) = f_x (x - x_i) + f_y (y - y_i) + f_i$,
+$Q_i(x,y) = f_x (x - x_i) + f_y (y - y_i) + f_i$, &emsp;&emsp;**(6)**
 
 where $f_x$ and $f_y$ are partial derivatives at the scatter point that have been previously estimated based on the geometry of the surrounding scatter points. Gradients are finding the coefficients of a plane that passes through the point, and approximates neighboring points using a weighted least squares regression (could use the same weights as above).
 
 The planes represented by the above equation are sometimes called "gradient planes". By averaging planes rather than constant values at each scatter point, the resulting surface infers extremities and is asymptotic to the gradient plane at the scatter point rather than forming a flat plateau at the scatter point.
 
+#### Code Implementation — Gradient Plane (`services/idw.ts`)
+
+**Neighbor selection (line 168):** For each scatter point $i$, the code queries the kd-tree for the `fitK` nearest neighbors (excluding self), where:
+
+`fitK = min(nWells - 1, max(5, neighborCount))`
+
+So at least 5 neighbors are used for gradient fitting, or `neighborCount` if larger.
+
+**Fitting weights (lines 186–192):** The weights used in the least squares fit are:
+
+$w_j^{fit} = \dfrac{\left(\dfrac{R_w - d_j}{R_w \cdot d_j}\right)^p}{\sum_{m} \left(\dfrac{R_w - d_m}{R_w \cdot d_m}\right)^p}$ &emsp;&emsp;**(7)**
+
+where $R_w$ = distance to the farthest neighbor of scatter point $i$ (not the interpolation $R$), $d_j$ = distance from scatter point $i$ to neighbor $j$, and $p$ is the user-defined exponent (same as Eq. 4). The weights are normalized to sum to 1. The most distant neighbor ($d_j = R_w$) receives zero weight. Coincident neighbors ($d_j < 10^{-10}$) receive weight $10^{10}$.
+
+**System solved (`fitGradientPlane`, lines 80–99):** Weighted least squares minimizing:
+
+$\sum_j w_j^{fit} \left[ f_x (x_j - x_i) + f_y (y_j - y_i) - (f_j - f_i) \right]^2$ &emsp;&emsp;**(8)**
+
+Defining $\Delta x_j = x_j - x_i$, $\Delta y_j = y_j - y_i$, $\Delta f_j = f_j - f_i$, the 2×2 normal equations are:
+
+$\begin{bmatrix} \sum w \Delta x^2 & \sum w \Delta x \Delta y \\ \sum w \Delta x \Delta y & \sum w \Delta y^2 \end{bmatrix} \begin{bmatrix} f_x \\ f_y \end{bmatrix} = \begin{bmatrix} \sum w \Delta x \Delta f \\ \sum w \Delta y \Delta f \end{bmatrix}$ &emsp;&emsp;**(9)**
+
+Solved via Gaussian elimination with partial pivoting (`solveSmall`). Returns `[f_x, f_y]` or `null` if singular (pivot < $10^{-12}$).
+
+**Evaluation (`evalNodal`, lines 219–220):** When `coeffs.length === 2`:
+
+$Q_i(x,y) = f_i + f_x (x - x_i) + f_y (y - y_i)$ &emsp;&emsp;**(10)**
+
+**Fallback:** If fitting returns null, `nodalCoeffs[i]` stays null and `evalNodal` returns $f_i$ (classic constant behavior).
+
 ### Quadratic Nodal Functions
 
 The nodal functions used in inverse distance weighted interpolation can be higher degree polynomial functions constrained to pass through the scatter point and approximate the nearby points in a least squares manner. Quadratic polynomials have been found to work well in many cases (Franke & Nielson 1980; Franke 1982). The resulting surface reproduces local variations implicit in the dataset, is smooth, and approximates the quadratic nodal functions near the scatter points. The equation used for the quadratic nodal function centered at point $k$ is as follows:
 
-$Q_k(x,y) = a_{k1} + a_{k2}(x - x_k) + a_{k3}(y - y_k) + a_{k4}(x - x_k)^2 + a_{k5}(x - x_k)(y - y_k) + a_{k6}(y - y_k)^2$.
+$Q_k(x,y) = a_{k1} + a_{k2}(x - x_k) + a_{k3}(y - y_k) + a_{k4}(x - x_k)^2 + a_{k5}(x - x_k)(y - y_k) + a_{k6}(y - y_k)^2$. &emsp;&emsp;**(11)**
 
 To define the function, the six coefficients $a_{k1}, \dots, a_{k6}$ must be found. Since the function is centered at point $k$ and passes through point $k$, we know beforehand that $a_{k1} = f_k$, where $f_k$ is the function value at point $k$. The equation simplifies to:
 
-$Q_k(x,y) = f_k + a_{k2}(x - x_k) + a_{k3}(y - y_k) + a_{k4}(x - x_k)^2 + a_{k5}(x - x_k)(y - y_k) + a_{k6}(y - y_k)^2$.
+$Q_k(x,y) = f_k + a_{k2}(x - x_k) + a_{k3}(y - y_k) + a_{k4}(x - x_k)^2 + a_{k5}(x - x_k)(y - y_k) + a_{k6}(y - y_k)^2$. &emsp;&emsp;**(12)**
 
 Now there are only five unknown coefficients. The coefficients are found by fitting the quadratic to the nearest $N_Q$ scatter points using a weighted least squares approach. In order for the matrix equation used to solve for the coefficients to be stable, there should be at least five scatter points in the set.
+
+#### Code Implementation — Quadratic (`services/idw.ts`)
+
+**Neighbor selection (line 168):** For each scatter point $k$, the code queries the kd-tree for `fitK` nearest neighbors (excluding self), where:
+
+`fitK = min(nWells - 1, max(8, neighborCount))`
+
+So at least 8 neighbors are used for quadratic fitting (more margin than the theoretical minimum of 5), or `neighborCount` if larger.
+
+**Fitting weights:** Same as for gradient plane — Eq. **(7)** with user-defined exponent $p$, normalized to sum to 1, where $R_w$ is the max distance among neighbors of scatter point $k$.
+
+**Guard (line 107):** `fitQuadratic` returns null immediately if fewer than 5 neighbors are provided.
+
+**System solved (`fitQuadratic`, lines 103–130):** Defines the basis vector at each neighbor $j$:
+
+$\boldsymbol{\varphi}_j = [\Delta x_j, \; \Delta y_j, \; \Delta x_j^2, \; \Delta x_j \Delta y_j, \; \Delta y_j^2]$ &emsp;&emsp;**(13)**
+
+where $\Delta x_j = x_j - x_k$, $\Delta y_j = y_j - y_k$. The 5×5 normal equations are:
+
+$A_{pq} = \sum_j w_j^{fit} \; \varphi_{jp} \; \varphi_{jq}, \qquad b_p = \sum_j w_j^{fit} \; \varphi_{jp} \; (f_j - f_k)$ &emsp;&emsp;**(14)**
+
+Solved via Gaussian elimination (`solveSmall`). Returns $[a_{k2}, a_{k3}, a_{k4}, a_{k5}, a_{k6}]$ or `null` if singular.
+
+**Evaluation (`evalNodal`, lines 222–223):** When `coeffs.length === 5`:
+
+$Q_k(x,y) = f_k + a_{k2} \Delta x + a_{k3} \Delta y + a_{k4} \Delta x^2 + a_{k5} \Delta x \Delta y + a_{k6} \Delta y^2$ &emsp;&emsp;**(15)**
+
+**Fallback (lines 198–201):** If quadratic fitting fails, falls back to gradient plane fitting with the same neighbors. If that succeeds, stores `[f_x, f_y, 0, 0, 0]` — effectively a linear nodal function evaluated through the quadratic code path. If gradient also fails, `nodalCoeffs[k]` stays null and `evalNodal` returns $f_k$ (classic).
+
+#### Code Implementation — Interpolation Weights (`services/idw.ts`, lines 270–290)
+
+The interpolation weights (used when combining nodal function values at an interpolation point) are:
+
+$w_i = \left(\dfrac{R - h_i}{R \cdot h_i}\right)^p$ &emsp;&emsp;**(16)**
+
+where $p$ is the user's **exponent** parameter (default 2), $h_i$ is the distance from the interpolation point to scatter point $i$, and $R$ is the distance to the farthest scatter point in the active set for that interpolation point.
+
+Both the fitting weights (Eq. 7) and the interpolation weights (Eq. 16) use the same user-defined exponent $p$ and are normalized to sum to 1, consistent with Eq. **(4)**.
+
+Scatter points at $h_i \geq R$ are skipped (zero weight).
 
 ### Number of Neighboring Points
 

@@ -183,13 +183,15 @@ export function idwGrid(
         if (dist > Rw) Rw = dist;
       }
 
-      // Fitting weights: ((Rw - d) / (Rw * d))^2
+      // Fitting weights: ((Rw - d) / (Rw * d))^p, normalized to sum to 1
       const neighW: number[] = neighDist.map(d => {
         if (d < 1e-10) return 1e10;
         if (d >= Rw) return 0;
-        const ratio = (Rw - d) / (Rw * d);
-        return ratio * ratio;
+        return Math.pow((Rw - d) / (Rw * d), exponent);
       });
+      let sumFitW = 0;
+      for (const w of neighW) sumFitW += w;
+      if (sumFitW > 0) for (let j = 0; j < neighW.length; j++) neighW[j] /= sumFitW;
 
       if (nodalFn === 'quadratic') {
         const qCoeffs = fitQuadratic(wellXs[i], wellYs[i], wellValues[i], neighX, neighY, neighV, neighW);
