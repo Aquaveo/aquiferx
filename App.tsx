@@ -1269,18 +1269,33 @@ const App: React.FC = () => {
             {selectedAquifer && !(showTrends && (trendColors || aquiferTrendColors)) && (
               <div className="absolute top-2 left-2 z-[90] bg-white rounded-lg shadow-lg border border-slate-200 p-3" style={{ width: '180px' }}>
                 <div className="text-xs font-semibold text-slate-700 mb-2">Wells</div>
-                <div className="flex items-center gap-2 py-0.5">
-                  <span className="inline-block w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#3b82f6' }} />
-                  <span className="text-xs text-slate-600">2+ observations</span>
-                </div>
-                <div className="flex items-center gap-2 py-0.5">
-                  <span className="inline-block w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#6b7280' }} />
-                  <span className="text-xs text-slate-600">1 observation</span>
-                </div>
-                <div className="flex items-center gap-2 py-0.5">
-                  <span className="inline-block w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#ef4444' }} />
-                  <span className="text-xs text-slate-600">No data</span>
-                </div>
+                {rasterActiveWellIds ? (
+                  <>
+                    <div className="flex items-center gap-2 py-0.5">
+                      <span className="inline-block w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#22c55e' }} />
+                      <span className="text-xs text-slate-600">Active (has data)</span>
+                    </div>
+                    <div className="flex items-center gap-2 py-0.5">
+                      <span className="inline-block w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#4b5563' }} />
+                      <span className="text-xs text-slate-600">Inactive</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 py-0.5">
+                      <span className="inline-block w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#3b82f6' }} />
+                      <span className="text-xs text-slate-600">2+ observations</span>
+                    </div>
+                    <div className="flex items-center gap-2 py-0.5">
+                      <span className="inline-block w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#6b7280' }} />
+                      <span className="text-xs text-slate-600">1 observation</span>
+                    </div>
+                    <div className="flex items-center gap-2 py-0.5">
+                      <span className="inline-block w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#ef4444' }} />
+                      <span className="text-xs text-slate-600">No data</span>
+                    </div>
+                  </>
+                )}
               </div>
             )}
             {/* Trend legend */}
