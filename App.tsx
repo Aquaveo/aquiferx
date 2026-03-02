@@ -1601,7 +1601,7 @@ const App: React.FC = () => {
                         <LineChart data={storageChartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                           <XAxis
-                            dataKey="date" type="number" domain={['auto', 'auto']}
+                            dataKey="date" type="number" domain={['dataMin', 'dataMax']}
                             tickFormatter={(t: number) => new Date(t).getFullYear().toString()}
                             stroke="#94a3b8" fontSize={10}
                           />
