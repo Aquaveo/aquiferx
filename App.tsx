@@ -1083,7 +1083,7 @@ const App: React.FC = () => {
             setSelectedAquifer(null);
           }
         }}
-        aquifers={filteredAquifers}
+        allAquifers={aquifers}
         selectedAquifer={selectedAquifer}
         setSelectedAquifer={(a) => {
           setSelectedAquifer(a);
@@ -1091,7 +1091,6 @@ const App: React.FC = () => {
         }}
         visibleRegionIds={visibleRegionIds}
         onToggleRegionVisibility={toggleRegionVisibility}
-        openDataManager={() => setIsDataManagerOpen(true)}
         onEditRegion={handleEditRegion}
         onDownloadRegion={handleDownloadRegion}
         onDeleteRegion={handleDeleteRegion}
