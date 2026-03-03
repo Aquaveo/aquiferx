@@ -629,8 +629,8 @@ const RasterOverlay: React.FC<RasterOverlayProps> = ({
         </button>
       </div>
 
-      {/* Color legend + Cross Section button — top-right */}
-      <div className="absolute top-3 right-3 z-[95] flex flex-col items-end gap-2">
+      {/* Color legend + Cross Section button — top-right, below basemap selector */}
+      <div className="absolute top-14 right-3 z-[95] flex flex-col items-end gap-2">
         <div className="bg-white/95 backdrop-blur rounded-lg shadow-lg border border-slate-200 p-3">
           <button
             onClick={() => setShowRampPicker(!showRampPicker)}
