@@ -47,9 +47,9 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
   }, [logMessages]);
 
   // --- Step 1 options ---
-  const [minSamples, setMinSamples] = useState(10);
-  const [gapSizeMonths, setGapSizeMonths] = useState(24);
-  const [padSizeMonths, setPadSizeMonths] = useState(6);
+  const [minSamples, setMinSamples] = useState(5);
+  const [gapSizeDays, setGapSizeDays] = useState(730);
+  const [padSizeDays, setPadSizeDays] = useState(180);
 
   // --- Step 2 ---
   const [title, setTitle] = useState('');
@@ -108,46 +108,9 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
       return { label: bin.label, count: wellsInBin.size, startTs: bin.start.getTime() };
     }).filter(b => b.startTs >= allMin - 365 * 86400000 && b.startTs <= allMax + 365 * 86400000);
 
-    // Compute per-well time series span
-    const wellSpans: { min: number; max: number }[] = [];
-    for (const [, dates] of byWellDate) {
-      let wMin = Infinity, wMax = -Infinity;
-      for (const d of dates) {
-        const t = new Date(d).getTime();
-        if (!isNaN(t)) { if (t < wMin) wMin = t; if (t > wMax) wMax = t; }
-      }
-      if (wMin < Infinity) wellSpans.push({ min: wMin, max: wMax });
-    }
-
-    // 3% threshold with min 5 wells (less restrictive than spatial analysis)
-    const threshold = Math.max(5, Math.ceil(wellSpans.length * 0.03));
-    let defStartYear = -1, defEndYear = -1;
-    for (let y = minYear; y <= maxYear; y++) {
-      const jan1 = new Date(y, 0, 1).getTime();
-      let spanning = 0;
-      for (const span of wellSpans) {
-        if (span.min <= jan1 && span.max >= jan1) spanning++;
-      }
-      if (spanning >= threshold) {
-        if (defStartYear === -1) defStartYear = y;
-        defEndYear = y;
-      }
-    }
-
-    let defStart: string, defEnd: string;
-    if (defStartYear >= 0) {
-      defStart = `${defStartYear}-01-01`;
-      defEnd = `${defEndYear}-01-01`;
-    } else {
-      defStart = minDateStr;
-      defEnd = maxDateStr;
-    }
-
-    // Clamp to GLDAS range if available
-    if (gldasDateRange) {
-      if (defStart < gldasDateRange.min) defStart = gldasDateRange.min;
-      if (defEnd > gldasDateRange.max) defEnd = gldasDateRange.max;
-    }
+    // Default dates: full GLDAS feature range (matches Python notebook behavior)
+    let defStart = gldasDateRange?.min ?? minDateStr;
+    let defEnd = gldasDateRange?.max ?? maxDateStr;
 
     return { densityData, defaultStartDate: defStart, defaultEndDate: defEnd };
   }, [wteMeasurements, gldasDateRange]);
@@ -189,14 +152,11 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
     return { qualifiedWellCount: qualified, omittedWellCount: omitted };
   }, [wteMeasurements, minSamples]);
 
-  // GLDAS range warning
-  const gldasWarning = useMemo(() => {
+  // GLDAS range info
+  const gldasInfo = useMemo(() => {
     if (!gldasDateRange) return 'GLDAS date range not available. The wizard will attempt to fetch GLDAS data during processing.';
-    if (startDate < gldasDateRange.min || endDate > gldasDateRange.max) {
-      return `Selected dates extend beyond GLDAS range (${gldasDateRange.min} to ${gldasDateRange.max}). Dates will be clamped.`;
-    }
-    return null;
-  }, [gldasDateRange, startDate, endDate]);
+    return `Training uses full GLDAS range: ${gldasDateRange.min} to ${gldasDateRange.max}. Output dates clip the results.`;
+  }, [gldasDateRange]);
 
   // Validation
   const step1Valid = startDate && endDate && startDate < endDate && wells.length > 0 && qualifiedWellCount > 0;
@@ -212,9 +172,11 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
       title,
       startDate,
       endDate,
+      gldasStartDate: gldasDateRange?.min ?? startDate,
+      gldasEndDate: gldasDateRange?.max ?? endDate,
       minSamples,
-      gapSize: gapSizeMonths,
-      padSize: padSizeMonths,
+      gapSize: gapSizeDays,
+      padSize: padSizeDays,
       hiddenUnits: 500,
       lambda: 100,
     };
@@ -367,7 +329,7 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
               {/* Date Controls */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className={labelCls}>Start Date</label>
+                  <label className={labelCls}>Output Start Date</label>
                   <div className="flex items-center gap-1">
                     <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className={inputCls + ' flex-1'} />
                     <button type="button" className="p-1 text-slate-400 hover:text-slate-700" onClick={() => { const y = parseInt(startDate); if (!isNaN(y)) setStartDate(`${y - 1}-01-01`); }}>
@@ -379,7 +341,7 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
                   </div>
                 </div>
                 <div>
-                  <label className={labelCls}>End Date</label>
+                  <label className={labelCls}>Output End Date</label>
                   <div className="flex items-center gap-1">
                     <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className={inputCls + ' flex-1'} />
                     <button type="button" className="p-1 text-slate-400 hover:text-slate-700" onClick={() => { const y = parseInt(endDate); if (!isNaN(y)) setEndDate(`${y - 1}-01-01`); }}>
@@ -397,15 +359,15 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
                     onChange={e => setMinSamples(Math.max(2, parseInt(e.target.value) || 10))} className={inputCls} />
                 </div>
                 <div>
-                  <label className={labelCls}>Gap Size (months)</label>
-                  <input type="number" value={gapSizeMonths} min={1} max={240} step={1}
-                    onChange={e => setGapSizeMonths(Math.max(1, parseInt(e.target.value) || 24))} className={inputCls} />
+                  <label className={labelCls}>Gap Size (days)</label>
+                  <input type="number" value={gapSizeDays} min={1} max={7300} step={1}
+                    onChange={e => setGapSizeDays(Math.max(1, parseInt(e.target.value) || 730))} className={inputCls} />
                   <p className="text-[10px] text-slate-400 mt-0.5">Gaps larger than this use ELM model</p>
                 </div>
                 <div>
-                  <label className={labelCls}>Pad Size (months)</label>
-                  <input type="number" value={padSizeMonths} min={0} max={60} step={1}
-                    onChange={e => setPadSizeMonths(Math.max(0, parseInt(e.target.value) || 6))} className={inputCls} />
+                  <label className={labelCls}>Pad Size (days)</label>
+                  <input type="number" value={padSizeDays} min={0} max={1800} step={1}
+                    onChange={e => setPadSizeDays(Math.max(0, parseInt(e.target.value) || 180))} className={inputCls} />
                   <p className="text-[10px] text-slate-400 mt-0.5">PCHIP padding at gap boundaries</p>
                 </div>
 
@@ -419,11 +381,11 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
                 </div>
               </div>
 
-              {/* GLDAS Warning */}
-              {gldasWarning && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
-                  <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
-                  <p className="text-xs text-amber-700">{gldasWarning}</p>
+              {/* GLDAS Info */}
+              {gldasInfo && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2">
+                  <AlertTriangle size={14} className="text-blue-500 mt-0.5 shrink-0" />
+                  <p className="text-xs text-blue-700">{gldasInfo}</p>
                 </div>
               )}
             </div>
@@ -464,8 +426,8 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
                 <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-600">
                   <div><span className="text-slate-400">Dates:</span> {startDate} to {endDate}</div>
                   <div><span className="text-slate-400">Min Samples:</span> {minSamples}</div>
-                  <div><span className="text-slate-400">Gap Size:</span> {gapSizeMonths} months</div>
-                  <div><span className="text-slate-400">Pad Size:</span> {padSizeMonths} months</div>
+                  <div><span className="text-slate-400">Gap Size:</span> {gapSizeDays} days</div>
+                  <div><span className="text-slate-400">Pad Size:</span> {padSizeDays} days</div>
                   <div><span className="text-slate-400">Model:</span> ELM (500 units, λ=100)</div>
                   <div><span className="text-slate-400">Wells:</span> {qualifiedWellCount} qualified</div>
                 </div>

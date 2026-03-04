@@ -15,10 +15,13 @@ export interface GldasFeatures {
 const gldasCache = new Map<string, { features: GldasFeatures; range: { min: string; max: string } }>();
 
 /**
- * Fetch GLDAS date range via GetCapabilities XML
+ * Fetch GLDAS date range via GetCapabilities XML.
+ * The time dimension is a mix of comma-separated dates and start/end/period ranges.
+ * Matches notebook's get_time_bounds: split by comma, take first and last entries,
+ * then split the last entry by "/" to get the actual end date.
  */
 export async function fetchGldasDateRange(): Promise<{ min: string; max: string }> {
-  const capUrl = `${GLDAS_WMS_URL}?service=WMS&version=1.1.1&request=GetCapabilities`;
+  const capUrl = `${GLDAS_WMS_URL}?service=WMS&version=1.3.0&request=GetCapabilities`;
   const proxyUrl = `/api/gldas-proxy?url=${encodeURIComponent(capUrl)}`;
 
   const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
@@ -26,24 +29,24 @@ export async function fetchGldasDateRange(): Promise<{ min: string; max: string 
 
   const xml = await res.text();
 
-  // Parse time dimension from XML — look for <Dimension name="time"...>...</Dimension>
-  // The content is typically like "1948-01-01T00:00:00.000Z/2024-12-01T00:00:00.000Z/..."
-  const timeMatch = xml.match(/<Dimension[^>]*name="time"[^>]*>([\s\S]*?)<\/Dimension>/i);
-  if (!timeMatch) {
-    // Try alternate: <Extent name="time">
-    const extMatch = xml.match(/<Extent[^>]*name="time"[^>]*>([\s\S]*?)<\/Extent>/i);
-    if (!extMatch) throw new Error('Could not parse GLDAS time dimension from GetCapabilities');
-    const content = extMatch[1].trim();
-    const dates = content.split(/[/,]/);
-    return { min: dates[0].slice(0, 10), max: dates[dates.length > 2 ? dates.length - 1 : 1].slice(0, 10) };
-  }
+  // Parse time dimension from XML
+  const timeMatch = xml.match(/<Dimension[^>]*name="time"[^>]*>([\s\S]*?)<\/Dimension>/i)
+    || xml.match(/<Extent[^>]*name="time"[^>]*>([\s\S]*?)<\/Extent>/i);
+  if (!timeMatch) throw new Error('Could not parse GLDAS time dimension from GetCapabilities');
 
   const content = timeMatch[1].trim();
-  const dates = content.split(/[/,]/);
-  if (dates.length >= 2) {
-    return { min: dates[0].slice(0, 10), max: dates[1].slice(0, 10) };
-  }
-  throw new Error('Could not parse GLDAS time range');
+  // Split by comma first (entries are either individual dates or start/end/period ranges)
+  const entries = content.split(',').map(s => s.trim()).filter(Boolean);
+  if (entries.length === 0) throw new Error('Empty GLDAS time dimension');
+
+  // First entry: may be a date or a range — take the first date part
+  const minStr = entries[0].split('/')[0].trim().slice(0, 10);
+
+  // Last entry: may be a "start/end/period" range — take the end (index 1) if available
+  const lastParts = entries[entries.length - 1].split('/');
+  const maxStr = (lastParts.length >= 2 ? lastParts[1] : lastParts[0]).trim().slice(0, 10);
+
+  return { min: minStr, max: maxStr };
 }
 
 /**
@@ -90,10 +93,14 @@ function generateMonthlyDates(startDate: string, endDate: string): string[] {
   const dates: string[] = [];
   const start = new Date(startDate);
   const end = new Date(endDate);
-  let current = new Date(start.getFullYear(), start.getMonth(), 1);
-  while (current <= end) {
-    dates.push(current.toISOString().slice(0, 10));
-    current.setMonth(current.getMonth() + 1);
+  let year = start.getUTCFullYear();
+  let month = start.getUTCMonth();
+  while (true) {
+    const d = new Date(Date.UTC(year, month, 1));
+    if (d > end) break;
+    dates.push(d.toISOString().slice(0, 10));
+    month++;
+    if (month > 11) { month = 0; year++; }
   }
   return dates;
 }
@@ -127,24 +134,27 @@ export async function fetchGldasFeatures(
   startDate: string,
   endDate: string,
 ): Promise<GldasFeatures> {
-  // Check cache
+  // Check cache — only use if it covers the requested date range
   const cached = gldasCache.get(aquiferId);
-  if (cached) return cached.features;
+  if (cached && cached.range.min <= startDate && cached.range.max >= endDate) {
+    return cached.features;
+  }
 
   const [lat, lng] = computeAquiferCentroid(aquiferGeojson);
 
-  // Build WMS GetTimeseries request — use centroid bbox with WIDTH=1, HEIGHT=1
+  // Build WMS GetTimeseries request — match notebook's get_thredds_value format
   const delta = 0.125; // half of GLDAS 0.25° grid cell
   const bbox = `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`;
 
-  const timeseriesUrl = `${GLDAS_WMS_URL}?service=WMS&version=1.1.1&request=GetTimeseries` +
-    `&LAYERS=soilw` +
-    `&SRS=EPSG:4326` +
+  const timeseriesUrl = `${GLDAS_WMS_URL}?service=WMS&version=1.3.0&request=GetTimeseries` +
+    `&CRS=CRS:84&QUERY_LAYERS=soilw` +
+    `&X=0&Y=0&I=0&J=0` +
     `&BBOX=${bbox}` +
+    `&LAYER=soilw` +
     `&WIDTH=1&HEIGHT=1` +
     `&INFO_FORMAT=text/csv` +
-    `&TIME=${startDate}T00:00:00.000Z/${endDate}T00:00:00.000Z` +
-    `&X=0&Y=0`;
+    `&STYLES=raster/default` +
+    `&TIME=${startDate}T00:00:00.000Z/${endDate}T00:00:00.000Z`;
 
   const proxyUrl = `/api/gldas-proxy?url=${encodeURIComponent(timeseriesUrl)}`;
   const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
@@ -153,25 +163,24 @@ export async function fetchGldasFeatures(
   const csvText = await res.text();
   if (!csvText.trim()) throw new Error('GLDAS returned empty response');
 
-  // Parse CSV: lines like "2000-01-01T00:00:00.000Z,value"
+  // Parse CSV — notebook skips first 2 lines (comment lines starting with #),
+  // then header: "Time (UTC),Model-Calculated Monthly Mean Soil Moisture (mm)"
+  // then data: "1974-01-01T00:00:00.000Z,567.956"
   const lines = csvText.trim().split('\n');
   const rawDates: string[] = [];
   const rawValues: number[] = [];
 
-  // Skip header line(s)
-  let startIdx = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].match(/^\d{4}/)) {
-      startIdx = i;
-      break;
-    }
-  }
-
-  for (let i = startIdx; i < lines.length; i++) {
-    const parts = lines[i].split(',');
+    const line = lines[i].trim();
+    // Skip comment lines (# ...) and header lines
+    if (!line || line.startsWith('#') || line.startsWith('Time')) continue;
+    const parts = line.split(',');
     if (parts.length < 2) continue;
     const dateStr = parts[0].trim().slice(0, 10);
-    const value = parseFloat(parts[parts.length - 1].trim());
+    const valStr = parts[parts.length - 1].trim();
+    // Handle "none" values like the notebook does
+    if (valStr === 'none' || valStr === '') continue;
+    const value = parseFloat(valStr);
     if (dateStr && !isNaN(value)) {
       rawDates.push(dateStr);
       rawValues.push(value);
@@ -197,7 +206,7 @@ export async function fetchGldasFeatures(
   const yr05 = rollingMean(monthlySoilw, 60);
   const yr10 = rollingMean(monthlySoilw, 120);
 
-  // Trim leading NaN rows from 10-year rolling average
+  // Trim leading rows where 10-year rolling mean is NaN (~1948-1957)
   let trimStart = 0;
   for (let i = 0; i < yr10.length; i++) {
     if (!isNaN(yr10[i])) {

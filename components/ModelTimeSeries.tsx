@@ -46,9 +46,11 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
       // Uncombined view: green dots for measurements, red/blue lines
       const dataMap = new Map<number, any>();
 
-      // Add model rows
+      // Add model rows (monthly grid: 1st of each month)
+      const modelTimestamps: number[] = [];
       for (const row of modelRows) {
         const ts = new Date(row.date).getTime();
+        modelTimestamps.push(ts);
         dataMap.set(ts, {
           date: ts,
           model: row.model,
@@ -56,22 +58,65 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
         });
       }
 
-      // Add measurement dots
+      // Snap measurement dots to nearest monthly grid date so they don't
+      // break the PCHIP/ELM lines (measurements between grid dates would
+      // create entries with undefined pchip, severing connectNulls={false} lines).
+      // Measurements outside the model range keep their real dates so the
+      // chart x-axis expands to show them.
+      const modelMin = modelTimestamps.length > 0 ? modelTimestamps[0] : Infinity;
+      const modelMax = modelTimestamps.length > 0 ? modelTimestamps[modelTimestamps.length - 1] : -Infinity;
       for (const m of wteMeas) {
         const ts = new Date(m.date).getTime();
-        const existing = dataMap.get(ts) || { date: ts };
+        let snapTs = ts;
+        if (ts >= modelMin && ts <= modelMax) {
+          // Inside model range: snap to nearest grid date
+          let bestDist = Infinity;
+          for (const mt of modelTimestamps) {
+            const dist = Math.abs(mt - ts);
+            if (dist < bestDist) { bestDist = dist; snapTs = mt; }
+          }
+        }
+        const existing = dataMap.get(snapTs) || { date: snapTs };
         existing.measurement = m.value;
-        dataMap.set(ts, existing);
+        dataMap.set(snapTs, existing);
       }
 
       return Array.from(dataMap.values()).sort((a, b) => a.date - b.date);
     }
   }, [modelRows, wteMeas, showCombined]);
 
-  const formatDate = (ts: number) => {
-    const d = new Date(ts);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  };
+  // Compute tight Y domain from all values
+  const yDomain = useMemo(() => {
+    let min = Infinity, max = -Infinity;
+    for (const d of chartData) {
+      for (const key of ['pchip', 'elm', 'model', 'measurement'] as const) {
+        const v = d[key];
+        if (v != null && isFinite(v)) {
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      }
+    }
+    if (!isFinite(min)) return [0, 1];
+    const pad = (max - min) * 0.05 || 1;
+    return [min - pad, max + pad];
+  }, [chartData]);
+
+  const formatDate = (ts: number) => new Date(ts).getFullYear().toString();
+
+  // Generate ticks at Jan 1 of each year
+  const yearTicks = useMemo(() => {
+    if (chartData.length === 0) return [];
+    const minTs = chartData[0].date;
+    const maxTs = chartData[chartData.length - 1].date;
+    const startYear = new Date(minTs).getFullYear();
+    const endYear = new Date(maxTs).getFullYear();
+    const ticks: number[] = [];
+    for (let y = startYear; y <= endYear; y++) {
+      ticks.push(new Date(y, 0, 1).getTime());
+    }
+    return ticks;
+  }, [chartData]);
 
   if (modelRows.length === 0) {
     return (
@@ -120,13 +165,14 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
               type="number"
               scale="time"
               domain={['dataMin', 'dataMax']}
+              ticks={yearTicks}
               tickFormatter={formatDate}
               stroke="#94a3b8"
               fontSize={10}
             />
-            <YAxis stroke="#94a3b8" fontSize={10} />
+            <YAxis stroke="#94a3b8" fontSize={10} domain={yDomain} tickFormatter={(v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 1 })} />
             <Tooltip
-              labelFormatter={formatDate}
+              labelFormatter={(ts: number) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }}
               formatter={(value: number, name: string) => [
                 value?.toFixed(2) ?? 'N/A',
                 name === 'measurement' ? 'Measured' : name === 'pchip' ? 'PCHIP' : name === 'elm' ? 'ELM' : name === 'model' ? 'ELM' : name
@@ -143,6 +189,7 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
                   dot={false}
                   connectNulls={false}
                   name="PCHIP"
+                  animationDuration={400}
                 />
                 <Line
                   type="monotone"
@@ -152,6 +199,7 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
                   dot={false}
                   connectNulls={false}
                   name="ELM"
+                  animationDuration={400}
                 />
               </>
             ) : (
@@ -164,6 +212,7 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
                   dot={false}
                   connectNulls={false}
                   name="PCHIP"
+                  animationDuration={400}
                 />
                 <Line
                   type="monotone"
@@ -173,6 +222,7 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
                   dot={false}
                   connectNulls={false}
                   name="ELM"
+                  animationDuration={400}
                 />
                 <Line
                   type="monotone"
@@ -181,6 +231,7 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
                   dot={{ fill: '#22c55e', r: 3, strokeWidth: 0 }}
                   connectNulls={false}
                   name="Measured"
+                  isAnimationActive={false}
                 />
               </>
             )}

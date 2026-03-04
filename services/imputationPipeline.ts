@@ -3,7 +3,7 @@ import {
   ImputationParams, ImputationDataRow, ImputationModelResult, ImputationWellMetrics,
 } from '../types';
 import { fetchGldasFeatures, GldasFeatures } from './gldasFetch';
-import { trainElm, predictElm, buildFeatureMatrix } from './elm';
+import { trainElm, predictElm } from './elm';
 import { interpolatePCHIP } from '../utils/interpolation';
 import { slugify } from '../utils/strings';
 
@@ -11,9 +11,11 @@ export interface ImputationPipelineInput {
   title: string;
   startDate: string;
   endDate: string;
+  gldasStartDate: string;  // full GLDAS feature range start (from fetchGldasDateRange)
+  gldasEndDate: string;    // full GLDAS feature range end
   minSamples: number;
-  gapSize: number;    // months
-  padSize: number;    // months
+  gapSize: number;    // days (Python default: 730)
+  padSize: number;    // days (Python default: 180)
   hiddenUnits: number;
   lambda: number;
 }
@@ -23,31 +25,37 @@ function yieldToUI(): Promise<void> {
 }
 
 /**
- * Generate monthly date grid from startDate to endDate (inclusive)
+ * Generate monthly date grid from startDate to endDate (inclusive), UTC-based.
+ * Matches Python: pd.date_range(start, freq='1MS', end=end)
  */
 function generateMonthlyDates(startDate: string, endDate: string): string[] {
   const dates: string[] = [];
   const start = new Date(startDate);
   const end = new Date(endDate);
-  let current = new Date(start.getFullYear(), start.getMonth(), 1);
-  while (current <= end) {
-    dates.push(current.toISOString().slice(0, 10));
-    current.setMonth(current.getMonth() + 1);
+  let year = start.getUTCFullYear();
+  let month = start.getUTCMonth();
+  while (true) {
+    const d = new Date(Date.UTC(year, month, 1));
+    if (d > end) break;
+    dates.push(d.toISOString().slice(0, 10));
+    month++;
+    if (month > 11) { month = 0; year++; }
   }
   return dates;
 }
 
-/**
- * Compute gap in months between two dates
- */
-function monthsBetween(d1: string, d2: string): number {
-  const a = new Date(d1);
-  const b = new Date(d2);
-  return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
-}
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
- * Run the full imputation pipeline
+ * Run the full imputation pipeline.
+ *
+ * Matches the Python notebook flow:
+ * 1. interp_well — PCHIP per well with gap/pad blanking
+ * 2. Build combined dataframe (well PCHIP + GLDAS features)
+ * 3. zscore_training_data — global z-score normalization
+ * 4. Add year (min-max) and month (one-hot) features
+ * 5. impute_data — per-well ELM training on ALL wells
+ * 6. reverse_zscore_data — per-well denormalization
  */
 export async function runImputationPipeline(
   input: ImputationPipelineInput,
@@ -60,14 +68,18 @@ export async function runImputationPipeline(
 ): Promise<ImputationModelResult> {
   const { title, startDate, endDate, minSamples, gapSize, padSize, hiddenUnits, lambda } = input;
 
-  // Step 1: Fetch GLDAS data (0-5%)
+  // Gap/pad are already in days (matching Python's gap_size=730, pad=180)
+  const gapSizeMs = gapSize * MS_PER_DAY;
+  const padSizeMs = padSize * MS_PER_DAY;
+
+  // ===== Step 1: Fetch GLDAS data (0-5%) =====
   onProgress('Fetching GLDAS data...', 0);
   onLog(`Fetching GLDAS soil moisture data for aquifer "${aquifer.name}"...`);
   await yieldToUI();
 
   let gldas: GldasFeatures;
   try {
-    gldas = await fetchGldasFeatures(aquifer.id, aquifer.geojson, startDate, endDate);
+    gldas = await fetchGldasFeatures(aquifer.id, aquifer.geojson, input.gldasStartDate, input.gldasEndDate);
     onLog(`GLDAS data loaded: ${gldas.dates.length} monthly records, range ${gldas.dates[0]} to ${gldas.dates[gldas.dates.length - 1]}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -76,7 +88,7 @@ export async function runImputationPipeline(
   }
   onProgress('GLDAS data loaded', 5);
 
-  // Step 2: Prepare well data (5-10%)
+  // ===== Step 2: Prepare well data (5-10%) =====
   onProgress('Preparing well data...', 5);
   await yieldToUI();
 
@@ -87,9 +99,12 @@ export async function runImputationPipeline(
     byWell.get(m.wellId)!.push(m);
   }
 
-  // Filter wells by minSamples
-  const wellKeySet = new Set(wells.map(w => w.id));
-  const qualifiedWells: { well: Well; meas: Measurement[] }[] = [];
+  // Filter wells by minSamples (matches Python: wells_df.dropna(thresh=min_samples, axis=1))
+  interface QualifiedWell {
+    well: Well;
+    sorted: { date: string; ts: number; value: number }[];
+  }
+  const qualifiedWells: QualifiedWell[] = [];
   let omitted = 0;
 
   for (const well of wells) {
@@ -98,7 +113,15 @@ export async function runImputationPipeline(
       omitted++;
       continue;
     }
-    qualifiedWells.push({ well, meas });
+    const sorted = [...meas]
+      .filter(m => !isNaN(new Date(m.date).getTime()))
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .map(m => ({ date: m.date, ts: new Date(m.date).getTime(), value: m.value }));
+    if (sorted.length < 2) {
+      omitted++;
+      continue;
+    }
+    qualifiedWells.push({ well, sorted });
   }
 
   onLog(`${qualifiedWells.length} wells qualified (>= ${minSamples} measurements), ${omitted} omitted`);
@@ -109,9 +132,14 @@ export async function runImputationPipeline(
 
   onProgress('Well data prepared', 10);
 
-  // Step 3: Generate monthly date grid
-  const monthlyDates = generateMonthlyDates(startDate, endDate);
-  onLog(`Monthly date grid: ${monthlyDates.length} months from ${startDate} to ${endDate}`);
+  // ===== Step 3: Generate monthly date grid from actual GLDAS feature dates =====
+  // Use the actual trimmed GLDAS dates (not WMS capabilities dates) to match Python
+  const gldasFeatureStart = gldas.dates[0];
+  const gldasFeatureEnd = gldas.dates[gldas.dates.length - 1];
+  const monthlyDates = generateMonthlyDates(gldasFeatureStart, gldasFeatureEnd);
+  const monthlyTimestamps = monthlyDates.map(d => new Date(d).getTime());
+  onLog(`Training date grid: ${monthlyDates.length} months from ${gldasFeatureStart} to ${gldasFeatureEnd}`);
+  onLog(`Output will be clipped to: ${startDate} to ${endDate}`);
 
   // Build GLDAS lookup by date
   const gldasByDate = new Map<string, number>();
@@ -119,245 +147,277 @@ export async function runImputationPipeline(
     gldasByDate.set(gldas.dates[i], i);
   }
 
-  // Step 4: Per-well processing (10-90%)
-  const allDataRows: ImputationDataRow[] = [];
-  const wellMetrics: Record<string, ImputationWellMetrics> = {};
+  // ===== PHASE A: PCHIP interpolation for ALL wells =====
+  // Matches Python interp_well(wells_df, gap_size, pad, spacing)
+  onProgress('PCHIP interpolation...', 12);
+  await yieldToUI();
 
-  for (let wi = 0; wi < qualifiedWells.length; wi++) {
-    const { well, meas } = qualifiedWells[wi];
-    const pct = 10 + (wi / qualifiedWells.length) * 80;
-    onProgress(`Processing well ${wi + 1}/${qualifiedWells.length}...`, pct);
+  const wellPchip = new Map<string, (number | null)[]>();
 
-    // Sort measurements by date
-    const sorted = [...meas]
-      .filter(m => !isNaN(new Date(m.date).getTime()))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    if (sorted.length < 2) {
-      onLog(`Well ${well.name}: skipped (< 2 valid measurements)`);
-      continue;
-    }
-
-    // (a) Identify gaps between consecutive measurements
-    const measDates = sorted.map(m => m.date);
+  for (const { well, sorted } of qualifiedWells) {
+    const measTimestamps = sorted.map(m => m.ts);
     const measValues = sorted.map(m => m.value);
-    const measTimestamps = measDates.map(d => new Date(d).getTime());
-
-    // Classify gaps as small (<= gapSize months) or large (> gapSize months)
-    let hasLargeGap = false;
-    interface Gap { startDate: string; endDate: string; months: number; isLarge: boolean; }
-    const gaps: Gap[] = [];
-    for (let i = 0; i < measDates.length - 1; i++) {
-      const gapMonths = monthsBetween(measDates[i], measDates[i + 1]);
-      const isLarge = gapMonths > gapSize;
-      if (isLarge) hasLargeGap = true;
-      gaps.push({
-        startDate: measDates[i],
-        endDate: measDates[i + 1],
-        months: gapMonths,
-        isLarge,
-      });
-    }
-
-    // (b) PCHIP interpolate the full monthly date range
-    // Filter monthly dates to well's data range
-    const wellMonthlyDates: string[] = [];
-    const wellMonthlyTimestamps: number[] = [];
     const firstMeasTs = measTimestamps[0];
     const lastMeasTs = measTimestamps[measTimestamps.length - 1];
 
-    for (const d of monthlyDates) {
-      const ts = new Date(d).getTime();
-      if (ts >= firstMeasTs && ts <= lastMeasTs) {
-        wellMonthlyDates.push(d);
-        wellMonthlyTimestamps.push(ts);
+    // PCHIP interpolate to monthly dates within [firstMeas, lastMeas)
+    // Python blanks index >= end_meas_date, so last measurement date is excluded
+    const pchipFull: (number | null)[] = new Array(monthlyDates.length).fill(null);
+    const inRangeIndices: number[] = [];
+    const inRangeTimestamps: number[] = [];
+    for (let i = 0; i < monthlyDates.length; i++) {
+      const ts = monthlyTimestamps[i];
+      if (ts >= firstMeasTs && ts < lastMeasTs) {
+        inRangeIndices.push(i);
+        inRangeTimestamps.push(ts);
       }
     }
 
-    if (wellMonthlyDates.length === 0) {
-      onLog(`Well ${well.name}: skipped (no monthly dates within measurement range)`);
+    if (inRangeIndices.length > 0) {
+      const pchipValues = interpolatePCHIP(measTimestamps, measValues, inRangeTimestamps);
+      for (let j = 0; j < inRangeIndices.length; j++) {
+        pchipFull[inRangeIndices[j]] = pchipValues[j];
+      }
+    }
+
+    // Blank out interiors of large gaps, keeping pad at boundaries
+    // Matches Python: gap comparison in days, pad offsets from measurement dates
+    // Python: x_diff > gap_size (timedelta), start = meas[g-1] + timedelta(days=pad)
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const gapMs = measTimestamps[i + 1] - measTimestamps[i];
+      if (gapMs > gapSizeMs) {
+        const padStartTs = measTimestamps[i] + padSizeMs;
+        const padEndTs = measTimestamps[i + 1] - padSizeMs;
+        // Python: interp_df[start:end] = np.nan (inclusive on both ends)
+        for (const idx of inRangeIndices) {
+          const ts = monthlyTimestamps[idx];
+          if (ts >= padStartTs && ts <= padEndTs) {
+            pchipFull[idx] = null;
+          }
+        }
+      }
+    }
+
+    wellPchip.set(well.id, pchipFull);
+  }
+
+  // Second filter: drop wells with < minSamples non-NaN PCHIP values
+  // Matches Python: well_interp_df.dropna(thresh=min_samples, axis=1)
+  const activeWells: QualifiedWell[] = [];
+  for (const qw of qualifiedWells) {
+    const pchip = wellPchip.get(qw.well.id);
+    if (!pchip) continue;
+    const nonNullCount = pchip.filter(v => v !== null).length;
+    if (nonNullCount >= minSamples) {
+      activeWells.push(qw);
+    } else {
+      wellPchip.delete(qw.well.id);
+      onLog(`Well ${qw.well.name}: dropped after PCHIP (only ${nonNullCount} non-NaN values)`);
+    }
+  }
+
+  onLog(`PCHIP interpolation complete: ${activeWells.length} wells retained`);
+
+  // ===== PHASE B: Identify valid GLDAS rows =====
+  // Matches Python: combined_df.dropna(subset=names) — keep rows where GLDAS features are present
+  const validRowIndices: number[] = [];
+  for (let i = 0; i < monthlyDates.length; i++) {
+    if (gldasByDate.has(monthlyDates[i])) {
+      validRowIndices.push(i);
+    }
+  }
+  const nRows = validRowIndices.length;
+  onLog(`${nRows} valid GLDAS rows in date range`);
+
+  if (nRows === 0) {
+    throw new Error('No valid GLDAS data in the selected date range');
+  }
+
+  // GLDAS feature arrays for valid rows
+  const gldasSoilw = validRowIndices.map(i => gldas.soilw[gldasByDate.get(monthlyDates[i])!]);
+  const gldasYr01 = validRowIndices.map(i => gldas.soilw_yr01[gldasByDate.get(monthlyDates[i])!]);
+  const gldasYr03 = validRowIndices.map(i => gldas.soilw_yr03[gldasByDate.get(monthlyDates[i])!]);
+  const gldasYr05 = validRowIndices.map(i => gldas.soilw_yr05[gldasByDate.get(monthlyDates[i])!]);
+  const gldasYr10 = validRowIndices.map(i => gldas.soilw_yr10[gldasByDate.get(monthlyDates[i])!]);
+
+  // ===== PHASE C: Compute z-score statistics =====
+  // Matches Python: norm_df = zscore_training_data(combined_df, combined_df)
+  // Global per-column mean/std using sample std (ddof=1, pandas default)
+  onProgress('Computing normalization statistics...', 15);
+  await yieldToUI();
+
+  // Feature z-score stats (global, from ALL valid rows)
+  const gArrays = [gldasSoilw, gldasYr01, gldasYr03, gldasYr05, gldasYr10];
+  const featureMeans: number[] = [];
+  const featureStds: number[] = [];
+
+  for (let f = 0; f < 5; f++) {
+    let sum = 0;
+    for (let r = 0; r < nRows; r++) sum += gArrays[f][r];
+    const mean = sum / nRows;
+    featureMeans.push(mean);
+
+    let sumSq = 0;
+    for (let r = 0; r < nRows; r++) sumSq += (gArrays[f][r] - mean) ** 2;
+    // Sample std (ddof=1) matching pandas .std() default
+    featureStds.push(nRows > 1 ? Math.sqrt(sumSq / (nRows - 1)) || 1 : 1);
+  }
+
+  // Per-well target z-score stats (from non-NaN PCHIP values in valid GLDAS rows)
+  // Matches Python: combined_df[well_names].mean() / .std() (per-column, skipna=True, ddof=1)
+  const wellTargetStats = new Map<string, { mean: number; std: number }>();
+  const wellPchipAtRows = new Map<string, (number | null)[]>();
+
+  for (const { well } of activeWells) {
+    const pchipFull = wellPchip.get(well.id);
+    if (!pchipFull) continue;
+
+    // Get PCHIP values at valid GLDAS rows
+    const pchipAtRows = validRowIndices.map(i => pchipFull[i]);
+    wellPchipAtRows.set(well.id, pchipAtRows);
+
+    const nonNull = pchipAtRows.filter((v): v is number => v !== null);
+    if (nonNull.length < 2) continue;
+
+    const mean = nonNull.reduce((a, b) => a + b, 0) / nonNull.length;
+    let sumSq = 0;
+    for (const v of nonNull) sumSq += (v - mean) ** 2;
+    // Sample std (ddof=1)
+    const std = Math.sqrt(sumSq / (nonNull.length - 1)) || 1;
+
+    wellTargetStats.set(well.id, { mean, std });
+  }
+
+  // ===== PHASE D: Build feature matrix for ALL valid rows =====
+  // Columns: 5 z-scored GLDAS + 1 min-max year + 12 one-hot month + 1 bias = 19
+  // Matches Python: names = ['soilw', ..., 'soilw_yr10', 'year', 'month_1', ..., 'month_12'] + bias
+  onProgress('Building feature matrix...', 18);
+  await yieldToUI();
+
+  // Year min-max normalization (matches Python: (year - min) / (max - min))
+  const years = validRowIndices.map(i => new Date(monthlyDates[i]).getUTCFullYear());
+  const yearMin = Math.min(...years);
+  const yearMax = Math.max(...years);
+  const yearRange = yearMax - yearMin || 1;
+
+  const allFeatures: number[][] = [];
+  for (let r = 0; r < nRows; r++) {
+    const d = new Date(monthlyDates[validRowIndices[r]]);
+    const year = d.getUTCFullYear();
+    const month = d.getUTCMonth(); // 0-11 (matches Python's 1-12 one-hot encoding order)
+
+    // Z-score GLDAS features (using global stats)
+    const zGldas = gArrays.map((arr, f) => (arr[r] - featureMeans[f]) / featureStds[f]);
+
+    // Min-max normalized year
+    const normYear = (year - yearMin) / yearRange;
+
+    // One-hot month (12 columns)
+    const monthOneHot = new Array(12).fill(0);
+    monthOneHot[month] = 1;
+
+    // Combine: 5 GLDAS + 1 year + 12 month + 1 bias = 19
+    // Bias matches Python: np.hstack((tx, np.ones(n).T))
+    allFeatures.push([...zGldas, normYear, ...monthOneHot, 1.0]);
+  }
+
+  // ===== PHASE E: Per-well ELM training and prediction =====
+  // Matches Python: impute_data(norm_df, well_names, names) — trains ELM for EVERY well
+  const allDataRows: ImputationDataRow[] = [];
+  const wellMetrics: Record<string, ImputationWellMetrics> = {};
+
+  for (let wi = 0; wi < activeWells.length; wi++) {
+    const { well } = activeWells[wi];
+    const pct = 20 + (wi / activeWells.length) * 70;
+    onProgress(`ELM training well ${wi + 1}/${activeWells.length}...`, pct);
+
+    const targetStats = wellTargetStats.get(well.id);
+    const pchipAtRows = wellPchipAtRows.get(well.id);
+    if (!targetStats || !pchipAtRows) {
+      onLog(`Well ${well.name}: skipped (insufficient PCHIP overlap with GLDAS)`);
       continue;
     }
 
-    // PCHIP interpolate to monthly dates
-    const pchipValues = interpolatePCHIP(measTimestamps, measValues, wellMonthlyTimestamps);
+    // Z-score the PCHIP values for this well
+    // Matches Python: norm_df[well] = (combined_df[well] - mean) / std
+    const zPchip: (number | null)[] = pchipAtRows.map(v =>
+      v !== null ? (v - targetStats.mean) / targetStats.std : null
+    );
 
-    // (c) Null out interiors of large gaps in PCHIP, keeping padSize months at boundaries
-    const pchipFinal: (number | null)[] = [...pchipValues];
-
-    for (const gap of gaps) {
-      if (!gap.isLarge) continue;
-
-      // Find monthly dates within this gap (exclusive of boundary measurements)
-      const gapStartTs = new Date(gap.startDate).getTime();
-      const gapEndTs = new Date(gap.endDate).getTime();
-
-      for (let i = 0; i < wellMonthlyDates.length; i++) {
-        const ts = wellMonthlyTimestamps[i];
-        if (ts <= gapStartTs || ts >= gapEndTs) continue;
-
-        // Check if within padSize months of gap boundaries
-        const monthsFromStart = monthsBetween(gap.startDate, wellMonthlyDates[i]);
-        const monthsFromEnd = monthsBetween(wellMonthlyDates[i], gap.endDate);
-
-        if (monthsFromStart > padSize && monthsFromEnd > padSize) {
-          pchipFinal[i] = null; // Interior of large gap — null it out
-        }
+    // Training rows: where z-scored PCHIP is non-NaN
+    // Matches Python: train_nona_df = comb_df.dropna(subset=[well])
+    const trainIndices: number[] = [];
+    const trainTargets: number[] = [];
+    for (let r = 0; r < nRows; r++) {
+      if (zPchip[r] !== null) {
+        trainIndices.push(r);
+        trainTargets.push(zPchip[r]!);
       }
     }
 
-    // (d) ELM for large gaps
-    let elmPredictions: (number | null)[] = new Array(wellMonthlyDates.length).fill(null);
-
-    if (hasLargeGap) {
-      // Build feature matrix aligned with GLDAS dates
-      // First, compute z-score stats from GLDAS features covering the well's dates
-      const alignedGldasIndices: number[] = [];
-      for (const d of wellMonthlyDates) {
-        const idx = gldasByDate.get(d);
-        if (idx !== undefined) alignedGldasIndices.push(idx);
-        else alignedGldasIndices.push(-1);
-      }
-
-      // Check if we have enough GLDAS data
-      const validGldasCount = alignedGldasIndices.filter(i => i >= 0).length;
-      if (validGldasCount < wellMonthlyDates.length * 0.5) {
-        onLog(`Well ${well.name}: insufficient GLDAS overlap, using PCHIP only`);
-      } else {
-        // Get GLDAS values for the well's monthly dates
-        const wellGldasSoilw: number[] = [];
-        const wellGldasYr01: number[] = [];
-        const wellGldasYr03: number[] = [];
-        const wellGldasYr05: number[] = [];
-        const wellGldasYr10: number[] = [];
-
-        for (const idx of alignedGldasIndices) {
-          if (idx >= 0) {
-            wellGldasSoilw.push(gldas.soilw[idx]);
-            wellGldasYr01.push(gldas.soilw_yr01[idx]);
-            wellGldasYr03.push(gldas.soilw_yr03[idx]);
-            wellGldasYr05.push(gldas.soilw_yr05[idx]);
-            wellGldasYr10.push(gldas.soilw_yr10[idx]);
-          } else {
-            // Fill missing GLDAS with nearest available
-            wellGldasSoilw.push(0);
-            wellGldasYr01.push(0);
-            wellGldasYr03.push(0);
-            wellGldasYr05.push(0);
-            wellGldasYr10.push(0);
-          }
-        }
-
-        // Compute z-score stats from training data (where we have measurements)
-        // Find indices of monthly dates that are close to actual measurements
-        const trainIndices: number[] = [];
-        for (let i = 0; i < wellMonthlyDates.length; i++) {
-          // Match monthly date to nearest measurement
-          const ts = wellMonthlyTimestamps[i];
-          for (const mt of measTimestamps) {
-            if (Math.abs(ts - mt) < 45 * 24 * 60 * 60 * 1000) { // within 45 days
-              trainIndices.push(i);
-              break;
-            }
-          }
-        }
-
-        if (trainIndices.length < 3) {
-          onLog(`Well ${well.name}: too few training points for ELM, using PCHIP only`);
-        } else {
-          // Compute GLDAS feature means/stds from training indices
-          const featureMeans = [0, 0, 0, 0, 0];
-          const featureStds = [0, 0, 0, 0, 0];
-          const gArrays = [wellGldasSoilw, wellGldasYr01, wellGldasYr03, wellGldasYr05, wellGldasYr10];
-
-          for (let f = 0; f < 5; f++) {
-            let sum = 0;
-            for (const ti of trainIndices) sum += gArrays[f][ti];
-            featureMeans[f] = sum / trainIndices.length;
-          }
-          for (let f = 0; f < 5; f++) {
-            let sumSq = 0;
-            for (const ti of trainIndices) sumSq += (gArrays[f][ti] - featureMeans[f]) ** 2;
-            featureStds[f] = Math.sqrt(sumSq / trainIndices.length) || 1;
-          }
-
-          // Year normalization range from all dates
-          const years = wellMonthlyDates.map(d => new Date(d).getFullYear());
-          const yearMin = Math.min(...years);
-          const yearMax = Math.max(...years);
-
-          // Build training feature matrix
-          const trainDates = trainIndices.map(i => wellMonthlyDates[i]);
-          const trainGldasArrays = [
-            trainIndices.map(i => wellGldasSoilw[i]),
-            trainIndices.map(i => wellGldasYr01[i]),
-            trainIndices.map(i => wellGldasYr03[i]),
-            trainIndices.map(i => wellGldasYr05[i]),
-            trainIndices.map(i => wellGldasYr10[i]),
-          ];
-
-          const trainX = buildFeatureMatrix(
-            trainDates,
-            trainGldasArrays[0], trainGldasArrays[1],
-            trainGldasArrays[2], trainGldasArrays[3], trainGldasArrays[4],
-            featureMeans, featureStds, yearMin, yearMax,
-          );
-
-          // Get training targets: actual measurements PCHIP'd at those points
-          const trainY = trainIndices.map(i => pchipValues[i]);
-
-          // Train ELM
-          try {
-            const elmResult = trainElm(trainX, trainY, hiddenUnits, lambda);
-
-            // Store feature normalization params in model
-            elmResult.model.featureMeans = featureMeans;
-            elmResult.model.featureStds = featureStds;
-            elmResult.model.yearMin = yearMin;
-            elmResult.model.yearMax = yearMax;
-
-            wellMetrics[well.id] = { r2: elmResult.r2, rmse: elmResult.rmse };
-            onLog(`Well ${well.name}: ELM R²=${elmResult.r2.toFixed(4)}, RMSE=${elmResult.rmse.toFixed(2)}`);
-
-            // Predict all monthly dates
-            const allX = buildFeatureMatrix(
-              wellMonthlyDates,
-              wellGldasSoilw, wellGldasYr01,
-              wellGldasYr03, wellGldasYr05, wellGldasYr10,
-              featureMeans, featureStds, yearMin, yearMax,
-            );
-
-            const allPredictions = predictElm(elmResult.model, allX);
-            elmPredictions = allPredictions.map(v => v);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            onLog(`Well ${well.name}: ELM training failed: ${msg}, using PCHIP only`);
-          }
-        }
-      }
-    } else {
-      onLog(`Well ${well.name}: ${sorted.length} measurements, no gaps > ${gapSize} months, PCHIP only`);
+    if (trainIndices.length < 3) {
+      onLog(`Well ${well.name}: too few training points (${trainIndices.length}), skipping`);
+      continue;
     }
 
-    // (e) Combine: PCHIP where available, else ELM
-    for (let i = 0; i < wellMonthlyDates.length; i++) {
-      const pchipVal = pchipFinal[i];
-      const modelVal = elmPredictions[i];
-      const combined = pchipVal !== null ? pchipVal : (modelVal !== null ? modelVal : 0);
+    // Training feature matrix (subset of allFeatures)
+    // Matches Python: tx = train_nona_df[names].values
+    const trainX = trainIndices.map(r => allFeatures[r]);
 
-      allDataRows.push({
-        well_id: well.id,
-        date: wellMonthlyDates[i],
-        model: modelVal,
-        pchip: pchipVal,
-        combined,
-      });
+    try {
+      // Train ELM on pre-normalized data
+      // Matches Python: W_out = np.linalg.lstsq(X.T.dot(X) + lamb*I, X.T.dot(ty))
+      const elmResult = trainElm(trainX, trainTargets, hiddenUnits, lambda);
+
+      // Compute R²/RMSE on original (denormalized) scale
+      const trainPredDenorm = elmResult.trainPredictions.map(v => v * targetStats.std + targetStats.mean);
+      const trainTargetsDenorm = trainTargets.map(v => v * targetStats.std + targetStats.mean);
+      const trainMean = trainTargetsDenorm.reduce((a, b) => a + b, 0) / trainTargetsDenorm.length;
+      let ssTot = 0, ssRes = 0;
+      for (let i = 0; i < trainTargetsDenorm.length; i++) {
+        ssTot += (trainTargetsDenorm[i] - trainMean) ** 2;
+        ssRes += (trainTargetsDenorm[i] - trainPredDenorm[i]) ** 2;
+      }
+      const r2 = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+      const rmse = Math.sqrt(ssRes / trainTargetsDenorm.length);
+
+      wellMetrics[well.id] = { r2, rmse };
+      onLog(`Well ${well.name}: ELM R²=${r2.toFixed(4)}, RMSE=${rmse.toFixed(2)} (${trainIndices.length} training pts)`);
+
+      // Predict for ALL valid rows (full extrapolation)
+      // Matches Python: predict(all_tx_values, W_in, b, W_out)
+      const allPredNorm = predictElm(elmResult.model, allFeatures);
+
+      // Denormalize predictions
+      // Matches Python: reverse_zscore_data(imputed_norm_df, ref_df)
+      // = imputed * ref_df.std() + ref_df.mean()
+      const allPredDenorm = allPredNorm.map(v => v * targetStats.std + targetStats.mean);
+
+      // Assemble data rows: PCHIP where available, else ELM
+      const pchipFull = wellPchip.get(well.id)!;
+      for (let r = 0; r < nRows; r++) {
+        const monthlyIdx = validRowIndices[r];
+        const pchipVal = pchipFull[monthlyIdx];
+        const modelVal = allPredDenorm[r];
+        const combined = pchipVal !== null ? pchipVal : modelVal;
+
+        allDataRows.push({
+          well_id: well.id,
+          date: monthlyDates[monthlyIdx],
+          model: modelVal,
+          pchip: pchipVal,
+          combined,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      onLog(`Well ${well.name}: ELM training failed: ${msg}`);
     }
 
     if (wi % 3 === 0) await yieldToUI();
   }
 
-  // Step 5: Save result (90-100%)
+  // ===== Step 5: Save result (90-100%) =====
   onProgress('Saving model...', 90);
   await yieldToUI();
 
@@ -365,9 +425,19 @@ export async function runImputationPipeline(
   const aquiferSlug = slugify(aquifer.name);
   const filePath = `${region.id}/${aquiferSlug}/model_wte_${code}.json`;
 
+  // Filter output rows to the user's requested date range
+  const outputStartTs = new Date(startDate).getTime();
+  const outputEndTs = new Date(endDate).getTime();
+  const outputRows = allDataRows.filter(row => {
+    const ts = new Date(row.date).getTime();
+    return ts >= outputStartTs && ts <= outputEndTs;
+  });
+
   const params: ImputationParams = {
     startDate,
     endDate,
+    gldasStartDate: gldasFeatureStart,
+    gldasEndDate: gldasFeatureEnd,
     minSamples,
     gapSize,
     padSize,
@@ -386,7 +456,7 @@ export async function runImputationPipeline(
     createdAt: new Date().toISOString(),
     params,
     wellMetrics,
-    data: allDataRows,
+    data: outputRows,
     log: [], // Will be populated by caller from accumulated log messages
   };
 

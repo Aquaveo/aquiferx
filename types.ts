@@ -178,11 +178,13 @@ export interface RasterAnalysisMeta {
 }
 
 export interface ImputationParams {
-  startDate: string;
-  endDate: string;
+  startDate: string;       // output start
+  endDate: string;         // output end
+  gldasStartDate: string;  // training start (full GLDAS range)
+  gldasEndDate: string;    // training end
   minSamples: number;
-  gapSize: number;       // months
-  padSize: number;       // months
+  gapSize: number;       // days
+  padSize: number;       // days
   hiddenUnits: number;
   lambda: number;
 }
