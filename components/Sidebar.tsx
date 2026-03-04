@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Region, Aquifer, RasterAnalysisMeta, ImputationModelMeta } from '../types';
-import { MapPin, Droplets, MoreVertical, Pencil, Trash2, Download, AlertTriangle, Layers, Loader2, Info, Check, X as XIcon, ChevronRight, ChevronDown, Activity } from 'lucide-react';
+import { MapPin, Droplets, MoreVertical, Pencil, Trash2, Download, AlertTriangle, Layers, Loader2, Info, Check, X as XIcon, ChevronRight, ChevronDown, Activity, Eye, EyeOff } from 'lucide-react';
 
 interface SidebarProps {
   regions: Region[];
@@ -951,6 +951,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => {
               setFocusedItemKey(itemKey);
+              if (!visibleRegionIds.has(r.id)) onToggleRegionVisibility(r.id);
               handleRegionClick(r);
             }}
             className={`w-full text-left px-2 py-1.5 text-xs transition-all flex items-center group ${
@@ -958,7 +959,9 @@ const Sidebar: React.FC<SidebarProps> = ({
             } ${
               isSelected
                 ? 'bg-blue-600 text-white'
-                : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'
+                : visibleRegionIds.has(r.id)
+                  ? 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'
+                  : 'text-slate-300 hover:bg-slate-50 hover:text-blue-600'
             }`}
           >
             {/* Chevron */}
@@ -979,13 +982,6 @@ const Sidebar: React.FC<SidebarProps> = ({
             ) : (
               <div className="w-4 h-4 flex-shrink-0 mr-1" />
             )}
-            <input
-              type="checkbox"
-              checked={visibleRegionIds.has(r.id)}
-              onClick={e => e.stopPropagation()}
-              onChange={() => onToggleRegionVisibility(r.id)}
-              className="flex-shrink-0 w-3.5 h-3.5 rounded accent-blue-600 cursor-pointer mr-2"
-            />
             <MapPin size={12} className={`mr-2 flex-shrink-0 ${isSelected ? 'text-blue-200' : 'text-slate-300'}`} />
             <span className="font-medium truncate flex-1">{r.name}</span>
             <div
@@ -1009,6 +1005,13 @@ const Sidebar: React.FC<SidebarProps> = ({
               >
                 <Pencil size={12} />
                 <span>Edit</span>
+              </button>
+              <button
+                onClick={() => { onToggleRegionVisibility(r.id); setMenuOpen(null); }}
+                className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center space-x-2"
+              >
+                {visibleRegionIds.has(r.id) ? <EyeOff size={12} /> : <Eye size={12} />}
+                <span>{visibleRegionIds.has(r.id) ? 'Hide Region' : 'Show Region'}</span>
               </button>
               <button
                 onClick={() => { setMenuOpen(null); onDownloadRegion(r.id); }}
