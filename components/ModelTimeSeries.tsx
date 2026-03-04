@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Legend, Scatter, ScatterChart, ComposedChart,
+  Legend, Scatter, ScatterChart, ComposedChart, ReferenceLine,
 } from 'recharts';
 import { ImputationModelResult, Well, Measurement } from '../types';
 import { ChevronDown, ChevronRight } from 'lucide-react';
@@ -16,11 +16,12 @@ interface ModelTimeSeriesProps {
   lengthUnit: 'ft' | 'm';
   showSmooth?: boolean;
   smoothMonths?: number;
+  showGSE?: boolean;
 }
 
 const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
   model, well, measurements, showCombined, onToggleCombined, lengthUnit,
-  showSmooth = false, smoothMonths = 3,
+  showSmooth = false, smoothMonths = 3, showGSE = false,
 }) => {
   const [logExpanded, setLogExpanded] = useState(false);
 
@@ -118,10 +119,14 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
         }
       }
     }
+    if (showGSE && well.gse != null && !isNaN(well.gse)) {
+      if (well.gse < min) min = well.gse;
+      if (well.gse > max) max = well.gse;
+    }
     if (!isFinite(min)) return [0, 1];
     const pad = (max - min) * 0.05 || 1;
     return [min - pad, max + pad];
-  }, [chartData]);
+  }, [chartData, showGSE, well.gse]);
 
   const formatDate = (ts: number) => new Date(ts).getFullYear().toString();
 
@@ -153,16 +158,10 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
       <div className="flex items-center justify-between px-3 py-1.5 bg-amber-50 border-b border-amber-200">
         <div className="flex items-center gap-3">
           <span className="text-xs font-semibold text-amber-800">Model: {model.title}</span>
-          <button
-            onClick={onToggleCombined}
-            className={`px-2 py-0.5 text-[10px] font-medium rounded-full border transition-colors ${
-              showCombined
-                ? 'bg-amber-600 text-white border-amber-600'
-                : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50'
-            }`}
-          >
-            {showCombined ? 'Combined' : 'Separated'}
-          </button>
+          <label className="flex items-center gap-1 text-[10px] text-amber-800 cursor-pointer select-none">
+            <input type="checkbox" checked={showCombined} onChange={onToggleCombined} className="accent-amber-600" />
+            Combined
+          </label>
         </div>
         {wellMetrics && (
           <div className="flex items-center gap-2">
@@ -242,7 +241,7 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
                   type="monotone"
                   dataKey="pchip"
                   stroke="#ef4444"
-                  strokeWidth={1.5}
+                  strokeWidth={2}
                   dot={false}
                   connectNulls={false}
                   name="PCHIP"
@@ -261,7 +260,8 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
                 <Line
                   type="monotone"
                   dataKey="measurement"
-                  stroke="none"
+                  stroke="#22c55e"
+                  strokeWidth={0}
                   dot={{ fill: '#22c55e', r: 3, strokeWidth: 0 }}
                   connectNulls={false}
                   name="Measured"
@@ -270,7 +270,35 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
               </>
             )}
 
-            {(!showCombined || smoothedData) && <Legend />}
+            {(
+              <Legend
+                content={({ payload }: any) => (
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 16, fontSize: 11 }}>
+                    {payload?.map((entry: any) => (
+                      <span key={entry.value} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: entry.color || '#666' }}>
+                        {entry.value === 'Measured' ? (
+                          <svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#22c55e" /></svg>
+                        ) : entry.value === 'MAvg' ? (
+                          <svg width="14" height="2"><line x1="0" y1="1" x2="14" y2="1" stroke={entry.color} strokeWidth="2" strokeDasharray="3 2" /></svg>
+                        ) : (
+                          <svg width="14" height="2"><line x1="0" y1="1" x2="14" y2="1" stroke={entry.color} strokeWidth="2" /></svg>
+                        )}
+                        {entry.value}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              />
+            )}
+            {showGSE && well.gse != null && !isNaN(well.gse) && (
+              <ReferenceLine
+                y={well.gse}
+                stroke="#8B4513"
+                strokeDasharray="6 3"
+                strokeWidth={1.5}
+                label={{ value: 'GSE', position: 'right', fill: '#8B4513', fontSize: 10 }}
+              />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       </div>

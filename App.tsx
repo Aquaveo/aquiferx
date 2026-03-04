@@ -1050,7 +1050,35 @@ const App: React.FC = () => {
 
   // Export time series data to CSV
   const exportToCSV = () => {
-    if (selectedWells.length === 0 || selectedWellMeasurements.length === 0) return;
+    if (selectedWells.length === 0) return;
+
+    // Model-aware export
+    if (selectedModel && selectedWells.length === 1) {
+      const modelRows = selectedModel.data
+        .filter(r => r.well_id === selectedWells[0].id)
+        .sort((a, b) => a.date.localeCompare(b.date));
+      if (modelRows.length === 0) return;
+
+      const headers = 'Date,PCHIP,ELM,Combined';
+      const csvRows = modelRows.map(r => {
+        const combined = r.pchip != null ? r.pchip : r.model;
+        return `${r.date},${r.pchip ?? ''},${r.model ?? ''},${combined ?? ''}`;
+      });
+
+      const csvContent = [headers, ...csvRows].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const wellName = selectedWells[0].name.replace(/[^a-z0-9]/gi, '_');
+      link.download = `${wellName}_model_${selectedModel.code}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    if (selectedWellMeasurements.length === 0) return;
 
     const unit = activeDataType.unit;
     const headers = ['Date', `${activeDataType.name} (${unit})`, 'Well Name', 'Aquifer ID'];
@@ -1552,14 +1580,18 @@ const App: React.FC = () => {
                               GSE
                             </label>
                           )}
-                          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-                            <input type="checkbox" checked={usePCHIP} onChange={(e) => setUsePCHIP(e.target.checked)} className="accent-blue-500" />
-                            PCHIP
-                          </label>
-                          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-                            <input type="checkbox" checked={showTrendLine} onChange={(e) => setShowTrendLine(e.target.checked)} className="accent-blue-500" />
-                            Trend Line
-                          </label>
+                          {!(selectedModel && selectedWells.length === 1) && (
+                            <>
+                              <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                                <input type="checkbox" checked={usePCHIP} onChange={(e) => setUsePCHIP(e.target.checked)} className="accent-blue-500" />
+                                PCHIP
+                              </label>
+                              <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                                <input type="checkbox" checked={showTrendLine} onChange={(e) => setShowTrendLine(e.target.checked)} className="accent-blue-500" />
+                                Trend Line
+                              </label>
+                            </>
+                          )}
                           {!(selectedModel && selectedWells.length === 1 && !showCombinedModel) && (
                             <>
                               <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
@@ -1584,18 +1616,20 @@ const App: React.FC = () => {
                               )}
                             </>
                           )}
-                          <button
-                            onClick={() => setIsDataEditorOpen(true)}
-                            disabled={selectedWells.length !== 1}
-                            className="flex items-center space-x-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            title={selectedWells.length !== 1 ? 'Select a single well to edit' : 'View/Edit measurement data'}
-                          >
-                            <Table size={14} />
-                            <span>View/Edit</span>
-                          </button>
+                          {!(selectedModel && selectedWells.length === 1) && (
+                            <button
+                              onClick={() => setIsDataEditorOpen(true)}
+                              disabled={selectedWells.length !== 1}
+                              className="flex items-center space-x-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              title={selectedWells.length !== 1 ? 'Select a single well to edit' : 'View/Edit measurement data'}
+                            >
+                              <Table size={14} />
+                              <span>View/Edit</span>
+                            </button>
+                          )}
                           <button
                             onClick={exportToCSV}
-                            disabled={selectedWellMeasurements.length === 0}
+                            disabled={selectedWellMeasurements.length === 0 && !(selectedModel && selectedWells.length === 1)}
                             className="flex items-center space-x-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-md text-sm font-medium hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             title="Export data to CSV"
                           >
@@ -1694,6 +1728,7 @@ const App: React.FC = () => {
                         lengthUnit={selectedRegion?.lengthUnit || 'ft'}
                         showSmooth={showSmooth}
                         smoothMonths={smoothMonths}
+                        showGSE={showGSE && activeDataType.code === 'wte'}
                       />
                     ) : effectiveTab === 'waterLevel' ? (
                       <TimeSeriesChart
