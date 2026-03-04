@@ -1694,6 +1694,34 @@ const App: React.FC = () => {
                               : <>{rasterResult!.params.interval} &bull; res={rasterResult!.params.resolution}</>
                             }
                           </span>
+                          <button
+                            onClick={() => {
+                              if (storageChartData.length === 0) return;
+                              const headers = ['Date', ...allRasterResults.map(r => `${r.title} (${storageVolumeUnit})`)];
+                              const rows = storageChartData.map(row => {
+                                const date = new Date(row.date).toISOString().slice(0, 10);
+                                const vals = allRasterResults.map((_, i) => {
+                                  const v = row[`value_${i}`];
+                                  return v !== undefined ? (v as number).toFixed(2) : '';
+                                });
+                                return [date, ...vals];
+                              });
+                              const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+                              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                              const url = URL.createObjectURL(blob);
+                              const link = document.createElement('a');
+                              link.href = url;
+                              link.download = `storage_change_${rasterResult!.code}.csv`;
+                              link.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                            disabled={storageChartData.length === 0}
+                            className="flex items-center space-x-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-md text-sm font-medium hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Export data to CSV"
+                          >
+                            <Download size={14} />
+                            <span>Export CSV</span>
+                          </button>
                         </div>
                       ) : (
                         <div className="text-[10px] text-slate-400">
@@ -1801,7 +1829,7 @@ const App: React.FC = () => {
                               dataKey={`value_${i}`}
                               stroke={STORAGE_COLORS[i % STORAGE_COLORS.length]}
                               strokeWidth={i === 0 ? 2 : 1.5}
-                              dot={{ r: i === 0 ? 3 : 2, fill: STORAGE_COLORS[i % STORAGE_COLORS.length] }}
+                              dot={{ r: i === 0 ? 1.5 : 1, fill: STORAGE_COLORS[i % STORAGE_COLORS.length] }}
                               isAnimationActive={false}
                               connectNulls
                             />
