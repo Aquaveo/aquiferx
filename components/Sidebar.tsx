@@ -33,6 +33,7 @@ interface SidebarProps {
   onUnloadModel: () => void;
   onDeleteModel: (meta: ImputationModelMeta) => void;
   onRenameModel?: (meta: ImputationModelMeta, newTitle: string) => void;
+  onGetModelInfo?: (meta: ImputationModelMeta) => void;
 }
 
 type TreeItemType = 'region' | 'aquifer' | 'raster' | 'model';
@@ -75,6 +76,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onUnloadModel,
   onDeleteModel,
   onRenameModel,
+  onGetModelInfo,
 }) => {
   // --- State ---
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -734,6 +736,15 @@ const Sidebar: React.FC<SidebarProps> = ({
               >
                 <Pencil size={11} />
                 <span>Edit</span>
+              </button>
+            )}
+            {onGetModelInfo && (
+              <button
+                onClick={() => { setMenuOpen(null); onGetModelInfo(m); }}
+                className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center space-x-2"
+              >
+                <Info size={11} />
+                <span>Get Info</span>
               </button>
             )}
             <button

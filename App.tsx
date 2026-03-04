@@ -15,6 +15,7 @@ import ImputationWizard from './components/ImputationWizard';
 import ModelTimeSeries from './components/ModelTimeSeries';
 import { fetchGldasDateRange } from './services/gldasFetch';
 import RasterInfoDialog from './components/RasterInfoDialog';
+import ModelInfoDialog from './components/ModelInfoDialog';
 import RasterOverlay from './components/RasterOverlay';
 import CrossSectionChart from './components/CrossSectionChart';
 import { computeStorageChange } from './utils/storageVolume';
@@ -561,6 +562,11 @@ const App: React.FC = () => {
   const [rasterInfoMeta, setRasterInfoMeta] = useState<RasterAnalysisMeta | null>(null);
   const handleGetRasterInfo = (meta: RasterAnalysisMeta) => {
     setRasterInfoMeta(meta);
+  };
+
+  const [modelInfoMeta, setModelInfoMeta] = useState<ImputationModelMeta | null>(null);
+  const handleGetModelInfo = (meta: ImputationModelMeta) => {
+    setModelInfoMeta(meta);
   };
 
   // --- Imputation model handlers ---
@@ -1226,6 +1232,7 @@ const App: React.FC = () => {
         onUnloadModel={handleUnloadModel}
         onDeleteModel={handleDeleteModel}
         onRenameModel={handleRenameModel}
+        onGetModelInfo={handleGetModelInfo}
       />
 
       {/* Main Content Area */}
@@ -1923,6 +1930,14 @@ const App: React.FC = () => {
         <RasterInfoDialog
           meta={rasterInfoMeta}
           onClose={() => setRasterInfoMeta(null)}
+        />
+      )}
+
+      {/* Model Info Dialog */}
+      {modelInfoMeta && (
+        <ModelInfoDialog
+          meta={modelInfoMeta}
+          onClose={() => setModelInfoMeta(null)}
         />
       )}
 
