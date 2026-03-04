@@ -93,13 +93,15 @@ export type IdwNeighborMode = 'all' | 'nearest';
 export type SpatialMethod = 'kriging' | 'idw';
 
 export interface TemporalOptions {
-  method: 'pchip' | 'linear' | 'moving-average';
+  method: 'pchip' | 'linear' | 'moving-average' | 'model';
   maWindow: number;
   startDate: string;
   endDate: string;
   interval: '3months' | '6months' | '1year';
   minObservations: number;
   minTimeSpan: number;
+  modelCode?: string;
+  modelFilePath?: string;
 }
 
 export interface KrigingOptions {
@@ -173,4 +175,56 @@ export interface RasterAnalysisMeta {
   createdAt: string;
   options?: RasterOptions;
   generatedAt?: string;
+}
+
+export interface ImputationParams {
+  startDate: string;
+  endDate: string;
+  minSamples: number;
+  gapSize: number;       // months
+  padSize: number;       // months
+  hiddenUnits: number;
+  lambda: number;
+}
+
+export interface ImputationWellMetrics {
+  r2: number;
+  rmse: number;
+}
+
+export interface ImputationDataRow {
+  well_id: string;
+  date: string;          // ISO date, monthly
+  model: number | null;  // ELM prediction
+  pchip: number | null;  // PCHIP interpolation
+  combined: number;      // resolved: pchip where available, else model
+}
+
+export interface ImputationModelResult {
+  title: string;
+  code: string;
+  aquiferId: string;
+  aquiferName: string;
+  regionId: string;
+  dataType: 'wte';
+  filePath: string;
+  createdAt: string;
+  params: ImputationParams;
+  wellMetrics: Record<string, ImputationWellMetrics>;
+  data: ImputationDataRow[];
+  log: string[];
+}
+
+// Lightweight version for listing (no data/log arrays)
+export interface ImputationModelMeta {
+  title: string;
+  code: string;
+  aquiferId: string;
+  aquiferName: string;
+  regionId: string;
+  filePath: string;
+  dataType: 'wte';
+  params: ImputationParams;
+  createdAt: string;
+  wellMetrics: Record<string, ImputationWellMetrics>;
 }

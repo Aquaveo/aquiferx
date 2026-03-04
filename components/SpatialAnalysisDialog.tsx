@@ -7,16 +7,11 @@ import {
 import {
   Aquifer, Region, Well, Measurement, DataType, RasterAnalysisResult,
   VariogramModel, KrigingRangeMode, IdwNodalFunction, IdwNeighborMode, SpatialMethod,
+  ImputationModelMeta,
 } from '../types';
-import { interpolatePCHIP } from '../utils/interpolation';
 import { runRasterAnalysis, RasterPipelineInput } from '../services/rasterAnalysis';
 import { slugify } from '../utils/strings';
-
-const PREVIEW_COLORS = [
-  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899',
-  '#14b8a6', '#f97316', '#6366f1', '#84cc16', '#06b6d4', '#e11d48',
-  '#a855f7', '#22c55e', '#eab308', '#0ea5e9',
-];
+import PchipPreviewCanvas from './PchipPreviewCanvas';
 
 interface SpatialAnalysisDialogProps {
   aquifer: Aquifer;
@@ -27,203 +22,15 @@ interface SpatialAnalysisDialogProps {
   existingCodes: string[];
   onClose: () => void;
   onComplete: (result: RasterAnalysisResult) => void;
+  availableModels?: ImputationModelMeta[];
 }
 
 type Step = 1 | 2 | 3 | 'running' | 'complete';
 
-// Canvas-based PCHIP preview — handles hundreds of wells without crashing
-const PchipPreviewCanvas: React.FC<{
-  wells: Well[];
-  wteMeasurements: Measurement[];
-  startTs?: number;
-  endTs?: number;
-}> = ({ wells, wteMeasurements, startTs, endTs }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Compute PCHIP series per well (lightweight: just arrays, not Recharts data objects)
-  const wellSeries = useMemo(() => {
-    const byWell = new Map<string, Measurement[]>();
-    for (const m of wteMeasurements) {
-      if (!byWell.has(m.wellId)) byWell.set(m.wellId, []);
-      byWell.get(m.wellId)!.push(m);
-    }
-
-    const series: { points: [number, number][]; color: string }[] = [];
-    let colorIdx = 0;
-
-    for (const [wellId, meas] of byWell) {
-      const sorted = [...meas]
-        .filter(m => !isNaN(new Date(m.date).getTime()))
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-      if (sorted.length < 2) continue;
-
-      const xValues = sorted.map(m => new Date(m.date).getTime());
-      const yValues = sorted.map(m => m.value);
-      const minX = xValues[0];
-      const maxX = xValues[xValues.length - 1];
-      if (maxX - minX === 0) continue;
-
-      // Use fewer interpolation points per well for performance
-      const nPoints = Math.min(50, sorted.length * 3);
-      const step = (maxX - minX) / nPoints;
-      const targetX: number[] = [];
-      for (let x = minX; x <= maxX; x += step) targetX.push(x);
-
-      const interpolatedY = interpolatePCHIP(xValues, yValues, targetX);
-      const points: [number, number][] = targetX.map((x, i) => [x, interpolatedY[i]]);
-
-      series.push({ points, color: PREVIEW_COLORS[colorIdx % PREVIEW_COLORS.length] });
-      colorIdx++;
-    }
-
-    return series;
-  }, [wteMeasurements]);
-
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
-
-    const rect = container.getBoundingClientRect();
-    const W = rect.width;
-    const H = rect.height;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    canvas.style.width = `${W}px`;
-    canvas.style.height = `${H}px`;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.scale(dpr, dpr);
-
-    const margin = { top: 10, right: 10, bottom: 25, left: 50 };
-    const plotW = W - margin.left - margin.right;
-    const plotH = H - margin.top - margin.bottom;
-
-    // Find global data bounds
-    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
-    for (const s of wellSeries) {
-      for (const [x, y] of s.points) {
-        if (x < xMin) xMin = x;
-        if (x > xMax) xMax = x;
-        if (y < yMin) yMin = y;
-        if (y > yMax) yMax = y;
-      }
-    }
-    if (xMin >= xMax || yMin >= yMax) return;
-
-    // Add 5% Y padding
-    const yPad = (yMax - yMin) * 0.05 || 1;
-    yMin -= yPad;
-    yMax += yPad;
-
-    const toX = (v: number) => margin.left + ((v - xMin) / (xMax - xMin)) * plotW;
-    const toY = (v: number) => margin.top + (1 - (v - yMin) / (yMax - yMin)) * plotH;
-
-    // Background
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(0, 0, W, H);
-
-    // Grid lines
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.lineWidth = 0.5;
-    for (let i = 0; i <= 4; i++) {
-      const y = margin.top + (i / 4) * plotH;
-      ctx.beginPath();
-      ctx.moveTo(margin.left, y);
-      ctx.lineTo(W - margin.right, y);
-      ctx.stroke();
-    }
-
-    // Date range markers
-    if (startTs !== undefined) {
-      const sx = toX(startTs);
-      ctx.strokeStyle = '#10b981';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.moveTo(sx, margin.top);
-      ctx.lineTo(sx, margin.top + plotH);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    if (endTs !== undefined) {
-      const ex = toX(endTs);
-      ctx.strokeStyle = '#10b981';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.moveTo(ex, margin.top);
-      ctx.lineTo(ex, margin.top + plotH);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    // Draw wells
-    for (const s of wellSeries) {
-      ctx.strokeStyle = s.color;
-      ctx.lineWidth = 0.8;
-      ctx.globalAlpha = 0.6;
-      ctx.beginPath();
-      for (let i = 0; i < s.points.length; i++) {
-        const px = toX(s.points[i][0]);
-        const py = toY(s.points[i][1]);
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      }
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-
-    // X-axis labels (years)
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '10px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    const startYear = new Date(xMin).getFullYear();
-    const endYear = new Date(xMax).getFullYear();
-    const yearStep = Math.max(1, Math.round((endYear - startYear) / 8));
-    for (let y = startYear; y <= endYear; y += yearStep) {
-      const t = new Date(y, 0, 1).getTime();
-      const px = toX(t);
-      if (px >= margin.left && px <= W - margin.right) {
-        ctx.fillText(String(y), px, H - 5);
-      }
-    }
-
-    // Y-axis labels
-    ctx.textAlign = 'right';
-    for (let i = 0; i <= 4; i++) {
-      const val = yMin + (1 - i / 4) * (yMax - yMin);
-      const py = margin.top + (i / 4) * plotH;
-      ctx.fillText(val.toFixed(0), margin.left - 4, py + 3);
-    }
-  }, [wellSeries, startTs, endTs]);
-
-  useEffect(() => {
-    // Defer initial draw so the modal has finished layout
-    const raf = requestAnimationFrame(() => draw());
-    const handleResize = () => draw();
-    window.addEventListener('resize', handleResize);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [draw]);
-
-  return (
-    <div ref={containerRef} className="w-full h-full">
-      <canvas ref={canvasRef} className="w-full h-full" />
-    </div>
-  );
-};
-
 const STEP_LABELS = ['Temporal', 'Spatial', 'Title & Run'];
 
 const SpatialAnalysisDialog: React.FC<SpatialAnalysisDialogProps> = ({
-  aquifer, region, wells, measurements, dataType, existingCodes, onClose, onComplete,
+  aquifer, region, wells, measurements, dataType, existingCodes, onClose, onComplete, availableModels,
 }) => {
   const [step, setStep] = useState<Step>(1);
   const [progressText, setProgressText] = useState('');
@@ -237,8 +44,10 @@ const SpatialAnalysisDialog: React.FC<SpatialAnalysisDialogProps> = ({
   const [interval, setInterval] = useState<'3months' | '6months' | '1year'>('1year');
   const [minObs, setMinObs] = useState(5);
   const [minSpanYears, setMinSpanYears] = useState(5);
-  const [smoothingMethod, setSmoothingMethod] = useState<'pchip' | 'linear' | 'moving-average'>('pchip');
+  const [smoothingMethod, setSmoothingMethod] = useState<'pchip' | 'linear' | 'moving-average' | 'model'>('pchip');
   const [smoothingMonths, setSmoothingMonths] = useState(12);
+  const [selectedModelCode, setSelectedModelCode] = useState<string>('');
+  const [selectedModelFilePath, setSelectedModelFilePath] = useState<string>('');
 
   // --- Spatial options (Step 2) ---
   const [spatialMethod, setSpatialMethod] = useState<SpatialMethod>('kriging');
@@ -403,6 +212,7 @@ const SpatialAnalysisDialog: React.FC<SpatialAnalysisDialogProps> = ({
         interval,
         minObservations: minObs,
         minTimeSpan: minSpanYears,
+        ...(smoothingMethod === 'model' ? { modelCode: selectedModelCode, modelFilePath: selectedModelFilePath } : {}),
       },
       spatial: {
         method: spatialMethod,
@@ -670,12 +480,41 @@ const SpatialAnalysisDialog: React.FC<SpatialAnalysisDialogProps> = ({
                 </div>
                 <div>
                   <label className={labelCls}>Temporal Method</label>
-                  <select value={smoothingMethod} onChange={e => setSmoothingMethod(e.target.value as any)} className={inputCls}>
+                  <select value={smoothingMethod} onChange={e => {
+                    const val = e.target.value as any;
+                    setSmoothingMethod(val);
+                    if (val === 'model' && availableModels && availableModels.length > 0 && !selectedModelCode) {
+                      setSelectedModelCode(availableModels[0].code);
+                      setSelectedModelFilePath(availableModels[0].filePath);
+                    }
+                  }} className={inputCls}>
                     <option value="pchip">PCHIP</option>
                     <option value="linear">Linear</option>
                     <option value="moving-average">Moving Average</option>
+                    {availableModels && availableModels.length > 0 && (
+                      <option value="model">Model (Imputation)</option>
+                    )}
                   </select>
                 </div>
+                {smoothingMethod === 'model' && availableModels && availableModels.length > 0 && (
+                  <div>
+                    <label className={labelCls}>Imputation Model</label>
+                    <select
+                      value={selectedModelCode}
+                      onChange={e => {
+                        const code = e.target.value;
+                        setSelectedModelCode(code);
+                        const m = availableModels.find(mm => mm.code === code);
+                        if (m) setSelectedModelFilePath(m.filePath);
+                      }}
+                      className={inputCls}
+                    >
+                      {availableModels.map(m => (
+                        <option key={m.code} value={m.code}>{m.title}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {smoothingMethod === 'moving-average' && (
                   <div>
                     <label className={labelCls}>MA Window (months)</label>
@@ -879,7 +718,7 @@ const SpatialAnalysisDialog: React.FC<SpatialAnalysisDialogProps> = ({
                   <div><span className="text-slate-400">Dates:</span> {startDate} to {endDate}</div>
                   <div><span className="text-slate-400">Interval:</span> {interval}</div>
                   <div><span className="text-slate-400">Resolution:</span> {resolution} cols</div>
-                  <div><span className="text-slate-400">Temporal:</span> {smoothingMethod === 'pchip' ? 'PCHIP' : smoothingMethod === 'linear' ? 'Linear' : `MA ${smoothingMonths}mo`}</div>
+                  <div><span className="text-slate-400">Temporal:</span> {smoothingMethod === 'pchip' ? 'PCHIP' : smoothingMethod === 'linear' ? 'Linear' : smoothingMethod === 'model' ? `Model (${selectedModelCode})` : `MA ${smoothingMonths}mo`}</div>
                   <div><span className="text-slate-400">Wells:</span> {qualifiedWellCount} qualified</div>
                   <div><span className="text-slate-400">Method:</span> {spatialMethod === 'kriging' ? `Kriging (${variogramModel})` : `IDW (p=${idwExponent})`}</div>
                   {spatialMethod === 'kriging' && (

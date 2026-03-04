@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Region, Aquifer, RasterAnalysisMeta } from '../types';
-import { MapPin, Droplets, MoreVertical, Pencil, Trash2, Download, AlertTriangle, Layers, Loader2, Info, Check, X as XIcon, ChevronRight, ChevronDown } from 'lucide-react';
+import { Region, Aquifer, RasterAnalysisMeta, ImputationModelMeta } from '../types';
+import { MapPin, Droplets, MoreVertical, Pencil, Trash2, Download, AlertTriangle, Layers, Loader2, Info, Check, X as XIcon, ChevronRight, ChevronDown, Activity } from 'lucide-react';
 
 interface SidebarProps {
   regions: Region[];
@@ -27,15 +27,22 @@ interface SidebarProps {
   onDeleteRaster: (meta: RasterAnalysisMeta) => void;
   onRenameRaster?: (meta: RasterAnalysisMeta, newTitle: string) => void;
   onGetRasterInfo?: (meta: RasterAnalysisMeta) => void;
+  modelMeta: ImputationModelMeta[];
+  activeModelCode: string | null;
+  onLoadModel: (meta: ImputationModelMeta) => void;
+  onUnloadModel: () => void;
+  onDeleteModel: (meta: ImputationModelMeta) => void;
+  onRenameModel?: (meta: ImputationModelMeta, newTitle: string) => void;
 }
 
-type TreeItemType = 'region' | 'aquifer' | 'raster';
+type TreeItemType = 'region' | 'aquifer' | 'raster' | 'model';
 interface TreeItem {
   key: string;
   type: TreeItemType;
   regionId: string;
   aquiferId?: string;
   rasterCode?: string;
+  modelCode?: string;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -62,6 +69,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeleteRaster,
   onRenameRaster,
   onGetRasterInfo,
+  modelMeta,
+  activeModelCode,
+  onLoadModel,
+  onUnloadModel,
+  onDeleteModel,
+  onRenameModel,
 }) => {
   // --- State ---
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -103,6 +116,17 @@ const Sidebar: React.FC<SidebarProps> = ({
     return map;
   }, [rasterMeta]);
 
+  const modelsByAquifer = useMemo(() => {
+    const map = new Map<string, ImputationModelMeta[]>();
+    for (const m of modelMeta) {
+      const key = `${m.regionId}:${m.aquiferId}`;
+      const list = map.get(key) || [];
+      list.push(m);
+      map.set(key, list);
+    }
+    return map;
+  }, [modelMeta]);
+
   // --- Flat items for keyboard nav ---
   const flatItems = useMemo(() => {
     const items: TreeItem[] = [];
@@ -117,12 +141,16 @@ const Sidebar: React.FC<SidebarProps> = ({
             for (const m of rasters) {
               items.push({ key: `raster-${m.regionId}-${m.code}`, type: 'raster', regionId: r.id, aquiferId: a.id, rasterCode: m.code });
             }
+            const models = modelsByAquifer.get(`${r.id}:${a.id}`) || [];
+            for (const m of models) {
+              items.push({ key: `model-${m.regionId}-${m.code}`, type: 'model', regionId: r.id, aquiferId: a.id, modelCode: m.code });
+            }
           }
         }
       }
     }
     return items;
-  }, [regions, expandedRegionIds, expandedAquiferIds, aquifersByRegion, rastersByAquifer]);
+  }, [regions, expandedRegionIds, expandedAquiferIds, aquifersByRegion, rastersByAquifer, modelsByAquifer]);
 
   // --- Effects ---
 
@@ -274,10 +302,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       // Accordion: expand this, collapse sibling aquifers
       const regionAquifers = aquifersByRegion.get(a.regionId) || [];
       const rasters = rastersByAquifer.get(`${a.regionId}:${a.id}`) || [];
-      const hasRasters = rasters.length > 0;
-      setExpandedAquiferIds(hasRasters ? new Set([a.id]) : new Set());
+      const models = modelsByAquifer.get(`${a.regionId}:${a.id}`) || [];
+      const hasChildren = rasters.length > 0 || models.length > 0;
+      setExpandedAquiferIds(hasChildren ? new Set([a.id]) : new Set());
       // Restore last-active raster if none active
-      if (!activeRasterCode && hasRasters) {
+      if (!activeRasterCode && rasters.length > 0) {
         const lastCode = lastActiveRasterByAquifer.get(a.id);
         if (lastCode) {
           const meta = rasters.find(m => m.code === lastCode);
@@ -285,7 +314,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         }
       }
     }
-  }, [selectedAquifer, setSelectedAquifer, aquifersByRegion, rastersByAquifer, activeRasterCode, lastActiveRasterByAquifer, onLoadRaster]);
+  }, [selectedAquifer, setSelectedAquifer, aquifersByRegion, rastersByAquifer, modelsByAquifer, activeRasterCode, lastActiveRasterByAquifer, onLoadRaster]);
 
   const handleAquiferChevronClick = useCallback((aquiferId: string) => {
     setExpandedAquiferIds(prev => {
@@ -357,7 +386,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           const parentIdx = flatItems.findIndex(i => i.key === `region-${item.regionId}`);
           if (parentIdx >= 0) focusItem(parentIdx);
         }
-      } else if (item.type === 'raster') {
+      } else if (item.type === 'raster' || item.type === 'model') {
         // Move to parent aquifer
         const parentIdx = flatItems.findIndex(i => i.key === `aquifer-${item.aquiferId}`);
         if (parentIdx >= 0) focusItem(parentIdx);
@@ -381,9 +410,18 @@ const Sidebar: React.FC<SidebarProps> = ({
             onLoadRaster(m);
           }
         }
+      } else if (item.type === 'model') {
+        const m = modelMeta.find(mm => mm.code === item.modelCode && mm.regionId === item.regionId);
+        if (m) {
+          if (activeModelCode === m.code) {
+            onUnloadModel();
+          } else {
+            onLoadModel(m);
+          }
+        }
       }
     }
-  }, [flatItems, focusedItemKey, expandedRegionIds, expandedAquiferIds, regions, allAquifers, rasterMeta, activeRasterCode, handleRegionClick, handleAquiferClick, handleRegionChevronClick, handleAquiferChevronClick, onLoadRaster, onUnloadRaster]);
+  }, [flatItems, focusedItemKey, expandedRegionIds, expandedAquiferIds, regions, allAquifers, rasterMeta, activeRasterCode, modelMeta, activeModelCode, handleRegionClick, handleAquiferClick, handleRegionChevronClick, handleAquiferChevronClick, onLoadRaster, onUnloadRaster, onLoadModel, onUnloadModel]);
 
   // --- Render helpers ---
 
@@ -566,12 +604,169 @@ const Sidebar: React.FC<SidebarProps> = ({
     );
   };
 
+  const renderModelRow = (m: ImputationModelMeta) => {
+    const isActive = activeModelCode === m.code;
+    const modelMenuKey = `model-${m.regionId}-${m.code}`;
+    const isModelMenuOpen = menuOpen === modelMenuKey;
+    const isModelConfirming = confirmDelete === modelMenuKey;
+    const isModelEditing = editing === `model-${m.regionId}-${m.code}`;
+    const itemKey = `model-${m.regionId}-${m.code}`;
+    const isFocused = focusedItemKey === itemKey;
+
+    if (isModelConfirming) {
+      return (
+        <div key={`model-${m.code}`} className="pl-16 pr-2 py-1" data-item-key={itemKey}>
+          <div className="px-2 py-1.5 rounded bg-red-50 border border-red-200 text-xs">
+            <p className="text-red-700 font-medium mb-1.5">Delete "{m.title}"?</p>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => { onDeleteModel(m); setConfirmDelete(null); }}
+                className="px-2 py-0.5 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700"
+              >
+                Delete
+              </button>
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="px-2 py-0.5 bg-white text-slate-600 rounded text-[10px] font-medium border border-slate-200 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (isModelEditing) {
+      return (
+        <div key={`model-${m.code}`} className="pl-16 pr-2 flex items-center gap-1 py-1" data-item-key={itemKey}>
+          <input
+            autoFocus
+            value={editValue}
+            onChange={e => setEditValue(e.target.value.replace(/[^a-zA-Z0-9 _-]/g, ''))}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                const trimmed = editValue.trim();
+                if (trimmed && trimmed !== m.title && onRenameModel) {
+                  onRenameModel(m, trimmed);
+                }
+                setEditing(null);
+              }
+              if (e.key === 'Escape') setEditing(null);
+            }}
+            className="flex-1 min-w-0 px-1.5 py-0.5 text-xs border border-amber-400 rounded outline-none focus:ring-2 focus:ring-amber-300"
+          />
+          <button
+            onClick={() => {
+              const trimmed = editValue.trim();
+              if (trimmed && trimmed !== m.title && onRenameModel) {
+                onRenameModel(m, trimmed);
+              }
+              setEditing(null);
+            }}
+            className="p-0.5 text-amber-600 hover:bg-amber-50 rounded"
+          >
+            <Check size={12} />
+          </button>
+          <button
+            onClick={() => setEditing(null)}
+            className="p-0.5 text-slate-400 hover:bg-slate-100 rounded"
+          >
+            <XIcon size={12} />
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        key={`model-${m.code}`}
+        className="relative group/model"
+        data-item-key={itemKey}
+      >
+        <div className={`flex items-center pl-16 pr-2 rounded transition-colors ${
+          isFocused ? 'ring-2 ring-inset ring-blue-400' : ''
+        } ${
+          isActive ? 'bg-amber-50' : 'hover:bg-slate-50'
+        }`}>
+          <button
+            onClick={() => {
+              setFocusedItemKey(itemKey);
+              if (isActive) {
+                onUnloadModel();
+              } else {
+                onLoadModel(m);
+              }
+            }}
+            className={`flex-1 text-left pr-1 py-1.5 text-xs flex items-center gap-2 min-w-0 ${
+              isActive
+                ? 'text-amber-700 font-medium'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Activity size={12} className={`flex-shrink-0 ${isActive ? 'text-amber-500' : 'text-slate-300'}`} />
+            <span className="truncate">{m.title}</span>
+            {isActive && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />}
+          </button>
+          <div
+            onClick={e => {
+              e.stopPropagation();
+              setMenuOpen(isModelMenuOpen ? null : modelMenuKey);
+              setConfirmDelete(null);
+            }}
+            className={`p-0.5 rounded mr-1 flex-shrink-0 opacity-0 group-hover/model:opacity-100 transition-opacity cursor-pointer hover:bg-slate-200 ${
+              isModelMenuOpen ? 'opacity-100' : ''
+            }`}
+          >
+            <MoreVertical size={12} />
+          </div>
+        </div>
+        {isModelMenuOpen && (
+          <div ref={menuRef} className="absolute right-1 top-full mt-0.5 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 min-w-[100px]">
+            {onRenameModel && (
+              <button
+                onClick={() => {
+                  setMenuOpen(null);
+                  setEditing(`model-${m.regionId}-${m.code}`);
+                  setEditValue(m.title);
+                }}
+                className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center space-x-2"
+              >
+                <Pencil size={11} />
+                <span>Edit</span>
+              </button>
+            )}
+            <button
+              onClick={() => { setMenuOpen(null); setConfirmDelete(modelMenuKey); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 flex items-center space-x-2"
+            >
+              <Trash2 size={11} />
+              <span>Delete</span>
+            </button>
+          </div>
+        )}
+        {/* Hover metadata tooltip */}
+        <div className="absolute left-full ml-2 top-0 hidden group-hover/model:block z-[60] pointer-events-none">
+          <div className="bg-slate-800 text-white text-[11px] rounded-lg p-3 shadow-xl min-w-[220px] leading-relaxed">
+            <div className="font-semibold text-amber-300 mb-1.5">{m.title}</div>
+            <div><span className="text-slate-400">Dates:</span> {m.params.startDate} &mdash; {m.params.endDate}</div>
+            <div><span className="text-slate-400">Gap Size:</span> {m.params.gapSize} months</div>
+            <div><span className="text-slate-400">Wells Modeled:</span> {Object.keys(m.wellMetrics).length}</div>
+            <div className="mt-1.5 text-slate-400 text-[10px]">Created {new Date(m.createdAt).toLocaleDateString()}</div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderAquiferRow = (a: Aquifer, regionId: string) => {
     const isSelected = selectedAquifer?.id === a.id;
     const isEditing = editing === `aquifer-${a.id}`;
     const isConfirming = confirmDelete === `aquifer-${a.id}`;
     const isMenuOpen = menuOpen === `aquifer-${a.id}`;
     const rasters = rastersByAquifer.get(`${regionId}:${a.id}`) || [];
+    const models = modelsByAquifer.get(`${regionId}:${a.id}`) || [];
+    const hasChildren = rasters.length > 0 || models.length > 0;
     const hasRasters = rasters.length > 0;
     const isExpanded = expandedAquiferIds.has(a.id);
     const itemKey = `aquifer-${a.id}`;
@@ -622,7 +817,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             }`}
           >
             {/* Chevron */}
-            {hasRasters && !isEditing ? (
+            {hasChildren && !isEditing ? (
               <div
                 onClick={e => {
                   e.stopPropagation();
@@ -692,10 +887,11 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
         </div>
-        {/* Raster children */}
-        {isExpanded && rasters.length > 0 && (
+        {/* Raster & Model children */}
+        {isExpanded && hasChildren && (
           <div className="space-y-0">
             {rasters.map(m => renderRasterRow(m))}
+            {models.map(m => renderModelRow(m))}
           </div>
         )}
       </div>

@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3, Maximize2, X } from 'lucide-react';
-import { Region, Aquifer, Well, Measurement, DataType, RasterAnalysisResult, RasterAnalysisMeta, CrossSectionProfile } from './types';
+import { Region, Aquifer, Well, Measurement, DataType, RasterAnalysisResult, RasterAnalysisMeta, CrossSectionProfile, ImputationModelResult, ImputationModelMeta } from './types';
 import { loadAllData } from './services/dataLoader';
 import { freshFetch } from './services/importUtils';
 import { slugify } from './utils/strings';
@@ -11,6 +11,9 @@ import TimeSeriesChart from './components/TimeSeriesChart';
 import ImportDataHub from './components/import/ImportDataHub';
 import DataEditor from './components/DataEditor';
 import SpatialAnalysisDialog from './components/SpatialAnalysisDialog';
+import ImputationWizard from './components/ImputationWizard';
+import ModelTimeSeries from './components/ModelTimeSeries';
+import { fetchGldasDateRange } from './services/gldasFetch';
 import RasterInfoDialog from './components/RasterInfoDialog';
 import RasterOverlay from './components/RasterOverlay';
 import CrossSectionChart from './components/CrossSectionChart';
@@ -218,6 +221,11 @@ const App: React.FC = () => {
   const [compareRasterResults, setCompareRasterResults] = useState<RasterAnalysisResult[]>([]);
   const [rasterMeta, setRasterMeta] = useState<RasterAnalysisMeta[]>([]);
   const [loadingRasterCode, setLoadingRasterCode] = useState<string | null>(null);
+  const [modelMeta, setModelMeta] = useState<ImputationModelMeta[]>([]);
+  const [imputationDialogOpen, setImputationDialogOpen] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<ImputationModelResult | null>(null);
+  const [gldasDateRange, setGldasDateRange] = useState<{ min: string; max: string } | null>(null);
+  const [showCombinedModel, setShowCombinedModel] = useState(false);
   const [crossSectionProfile, setCrossSectionProfile] = useState<CrossSectionProfile | null>(null);
   const [activeTimeSeriesTab, setActiveTimeSeriesTab] = useState<'waterLevel' | 'storageChange' | 'crossSection'>('waterLevel');
   const [rasterFrameDate, setRasterFrameDate] = useState<{ date: string; dateTs: number } | null>(null);
@@ -294,9 +302,10 @@ const App: React.FC = () => {
     setShowTrends(false);
   }, [selectedRegion?.id, selectedDataType]);
 
-  // Clear active raster overlay when aquifer changes
+  // Clear active raster overlay and model when aquifer changes
   useEffect(() => {
     setRasterResult(null);
+    setSelectedModel(null);
   }, [selectedAquifer?.id]);
 
   // Auto-switch time series tab based on raster result
@@ -423,7 +432,8 @@ const App: React.FC = () => {
         setWells(data.wells);
         setMeasurements(data.measurements);
         setRasterMeta(data.storageMeta);
-        console.log(`Loaded: ${data.regions.length} regions, ${data.aquifers.length} aquifers, ${data.wells.length} wells, ${data.measurements.length} measurements, ${data.storageMeta.length} raster analyses`);
+        setModelMeta(data.modelMeta);
+        console.log(`Loaded: ${data.regions.length} regions, ${data.aquifers.length} aquifers, ${data.wells.length} wells, ${data.measurements.length} measurements, ${data.storageMeta.length} raster analyses, ${data.modelMeta.length} models`);
       } catch (e) {
         console.error('Failed to load data:', e);
         setLoadError(e instanceof Error ? e.message : 'Failed to load data');
@@ -443,6 +453,7 @@ const App: React.FC = () => {
       setWells(data.wells);
       setMeasurements(data.measurements);
       setRasterMeta(data.storageMeta);
+      setModelMeta(data.modelMeta);
     } catch (e) {
       console.error('Failed to reload data:', e);
     }
@@ -550,6 +561,81 @@ const App: React.FC = () => {
   const [rasterInfoMeta, setRasterInfoMeta] = useState<RasterAnalysisMeta | null>(null);
   const handleGetRasterInfo = (meta: RasterAnalysisMeta) => {
     setRasterInfoMeta(meta);
+  };
+
+  // --- Imputation model handlers ---
+  const handleLoadModel = async (meta: ImputationModelMeta) => {
+    try {
+      const res = await fetch(`/data/${meta.filePath}`);
+      if (res.ok) {
+        const fullResult: ImputationModelResult = await res.json();
+        if (!selectedAquifer || selectedAquifer.id !== meta.aquiferId) {
+          const aq = aquifers.find(a => a.id === meta.aquiferId && a.regionId === meta.regionId);
+          if (aq) setSelectedAquifer(aq);
+        }
+        setSelectedModel(fullResult);
+      }
+    } catch (e) {
+      console.error('Failed to load model:', e);
+    }
+  };
+
+  const handleUnloadModel = () => {
+    setSelectedModel(null);
+  };
+
+  const handleDeleteModel = async (meta: ImputationModelMeta) => {
+    if (selectedModel?.code === meta.code) {
+      setSelectedModel(null);
+    }
+    setModelMeta(prev => prev.filter(m => !(m.code === meta.code && m.regionId === meta.regionId)));
+    try {
+      await fetch('/api/delete-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: meta.filePath }),
+      });
+    } catch (e) {
+      console.error('Failed to delete model file:', e);
+    }
+  };
+
+  const handleRenameModel = async (meta: ImputationModelMeta, newTitle: string) => {
+    const newCode = slugify(newTitle);
+    const oldPath = meta.filePath;
+    const dir = oldPath.substring(0, oldPath.lastIndexOf('/'));
+    const newPath = `${dir}/model_wte_${newCode}.json`;
+
+    try {
+      const res = await fetch('/api/rename-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldPath, newPath, newCode, newTitle }),
+      });
+      if (res.ok) {
+        setModelMeta(prev => prev.map(m =>
+          m.code === meta.code && m.regionId === meta.regionId
+            ? { ...m, title: newTitle, code: newCode, filePath: newPath }
+            : m
+        ));
+        if (selectedModel?.code === meta.code && selectedModel?.regionId === meta.regionId) {
+          setSelectedModel(prev => prev ? { ...prev, title: newTitle, code: newCode } : null);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to rename model:', e);
+    }
+  };
+
+  const handleOpenImputationWizard = async () => {
+    // Pre-fetch GLDAS date range
+    try {
+      const range = await fetchGldasDateRange();
+      setGldasDateRange(range);
+    } catch (e) {
+      console.warn('Could not pre-fetch GLDAS date range:', e);
+    }
+    setImputationDialogOpen(true);
   };
 
   // Active data type object
@@ -1106,6 +1192,12 @@ const App: React.FC = () => {
         onDeleteRaster={handleDeleteRaster}
         onRenameRaster={handleRenameRaster}
         onGetRasterInfo={handleGetRasterInfo}
+        modelMeta={modelMeta}
+        activeModelCode={selectedModel?.code || null}
+        onLoadModel={handleLoadModel}
+        onUnloadModel={handleUnloadModel}
+        onDeleteModel={handleDeleteModel}
+        onRenameModel={handleRenameModel}
       />
 
       {/* Main Content Area */}
@@ -1214,6 +1306,15 @@ const App: React.FC = () => {
               >
                 <BarChart3 size={16} />
                 <span>Spatial Analysis</span>
+              </button>
+            )}
+            {selectedAquifer && selectedDataType === 'wte' && (
+              <button
+                onClick={handleOpenImputationWizard}
+                className="flex items-center space-x-2 px-3 py-1.5 bg-amber-50 text-amber-700 rounded-md text-sm font-medium hover:bg-amber-100 transition-colors"
+              >
+                <Activity size={16} />
+                <span>Impute Gaps</span>
               </button>
             )}
             <button
@@ -1574,7 +1675,16 @@ const App: React.FC = () => {
                     </div>
                   )}
                   <div className="flex-1 min-h-0">
-                    {effectiveTab === 'waterLevel' ? (
+                    {selectedModel && selectedWells.length === 1 && effectiveTab === 'waterLevel' ? (
+                      <ModelTimeSeries
+                        model={selectedModel}
+                        well={selectedWells[0]}
+                        measurements={measurements}
+                        showCombined={showCombinedModel}
+                        onToggleCombined={() => setShowCombinedModel(p => !p)}
+                        lengthUnit={selectedRegion?.lengthUnit || 'ft'}
+                      />
+                    ) : effectiveTab === 'waterLevel' ? (
                       <TimeSeriesChart
                         measurements={selectedWellMeasurements}
                         selectedWells={selectedWells}
@@ -1682,6 +1792,7 @@ const App: React.FC = () => {
           measurements={measurements}
           dataType={activeDataType}
           existingCodes={rasterMeta.filter(a => a.aquiferId === selectedAquifer.id && a.regionId === selectedAquifer.regionId).map(a => a.code)}
+          availableModels={modelMeta.filter(m => m.aquiferId === selectedAquifer.id)}
           onClose={() => setRasterDialogOpen(false)}
           onComplete={(result) => {
             setRasterResult(result);
@@ -1700,6 +1811,35 @@ const App: React.FC = () => {
               generatedAt: result.generatedAt,
             }]);
             setRasterDialogOpen(false);
+          }}
+        />
+      )}
+
+      {/* Imputation Wizard */}
+      {imputationDialogOpen && selectedAquifer && selectedRegion && (
+        <ImputationWizard
+          aquifer={selectedAquifer}
+          region={selectedRegion}
+          wells={wells.filter(w => w.aquiferId === selectedAquifer.id && w.regionId === selectedAquifer.regionId)}
+          measurements={measurements}
+          existingModelCodes={modelMeta.filter(m => m.aquiferId === selectedAquifer.id && m.regionId === selectedAquifer.regionId).map(m => m.code)}
+          gldasDateRange={gldasDateRange}
+          onClose={() => setImputationDialogOpen(false)}
+          onComplete={(result) => {
+            setSelectedModel(result);
+            setModelMeta(prev => [...prev, {
+              title: result.title,
+              code: result.code,
+              aquiferId: result.aquiferId,
+              aquiferName: result.aquiferName,
+              regionId: result.regionId,
+              filePath: result.filePath,
+              dataType: result.dataType,
+              params: result.params,
+              createdAt: result.createdAt,
+              wellMetrics: result.wellMetrics,
+            }]);
+            setImputationDialogOpen(false);
           }}
         />
       )}

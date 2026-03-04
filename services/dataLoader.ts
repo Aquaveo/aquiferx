@@ -1,6 +1,6 @@
 import shp from 'shpjs';
 import polylabel from 'polylabel';
-import { Region, Aquifer, Well, Measurement, RegionMeta, RasterAnalysisMeta } from '../types';
+import { Region, Aquifer, Well, Measurement, RegionMeta, RasterAnalysisMeta, ImputationModelMeta } from '../types';
 import { freshFetch } from './importUtils';
 
 interface DataFolder {
@@ -374,6 +374,7 @@ export async function loadAllData(): Promise<{
   wells: Well[];
   measurements: Measurement[];
   storageMeta: RasterAnalysisMeta[];
+  modelMeta: ImputationModelMeta[];
 }> {
   const regionMetas = await loadRegionManifest();
 
@@ -382,6 +383,7 @@ export async function loadAllData(): Promise<{
   const allWells: Well[] = [];
   const allMeasurements: Measurement[] = [];
   const allStorageMeta: RasterAnalysisMeta[] = [];
+  const allModelMeta: ImputationModelMeta[] = [];
 
   for (const meta of regionMetas) {
     const folderPath = `/data/${meta.id}`;
@@ -429,6 +431,17 @@ export async function loadAllData(): Promise<{
     } catch (e) {
       console.warn(`Error loading storage metadata for ${meta.id}:`, e);
     }
+
+    // Load imputation model metadata
+    try {
+      const modelRes = await freshFetch(`/api/list-models?region=${encodeURIComponent(meta.id)}`);
+      if (modelRes.ok) {
+        const items: ImputationModelMeta[] = await modelRes.json();
+        for (const item of items) allModelMeta.push(item);
+      }
+    } catch (e) {
+      console.warn(`Error loading model metadata for ${meta.id}:`, e);
+    }
   }
 
   return {
@@ -437,5 +450,6 @@ export async function loadAllData(): Promise<{
     wells: allWells,
     measurements: allMeasurements,
     storageMeta: allStorageMeta,
+    modelMeta: allModelMeta,
   };
 }

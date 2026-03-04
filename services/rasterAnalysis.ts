@@ -2,6 +2,7 @@ import {
   Aquifer, Region, Well, Measurement,
   RasterAnalysisParams, RasterAnalysisResult, RasterGrid, RasterFrame,
   SpatialMethod, KrigingOptions, IdwOptions, GeneralInterpolationOptions, TemporalOptions, RasterOptions,
+  ImputationModelResult,
 } from '../types';
 import { isPointInGeoJSON } from '../utils/geo';
 import { interpolatePCHIP, interpolateLinear, kernelSmooth } from '../utils/interpolation';
@@ -97,43 +98,41 @@ export async function runRasterAnalysis(
 
   // For each well, interpolate to interval dates
   const wellInterp = new Map<string, { well: Well; values: (number | null)[] }>();
-  const wellIds = wells.map(w => w.id).filter(id => byWell.has(id));
 
-  for (let wi = 0; wi < wellIds.length; wi++) {
-    const wellId = wellIds[wi];
-    const well = wells.find(w => w.id === wellId)!;
-    const meas = byWell.get(wellId)!;
+  if (temporal.method === 'model' && temporal.modelFilePath) {
+    // Model-based temporal interpolation: fetch model JSON, use combined column
+    onProgress('Loading imputation model...', 5);
+    await yieldToUI();
 
-    onProgress(`Interpolating well ${wi + 1}/${wellIds.length}...`, (wi / wellIds.length) * 30);
-    if (wi % 5 === 0) await yieldToUI();
+    const modelResp = await fetch(`/data/${temporal.modelFilePath}`);
+    if (!modelResp.ok) throw new Error(`Failed to load model: ${temporal.modelFilePath}`);
+    const modelResult: ImputationModelResult = await modelResp.json();
 
-    const sorted = [...meas]
-      .filter(m => !isNaN(new Date(m.date).getTime()))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    // Group model data by well
+    const modelByWell = new Map<string, { dates: number[]; values: number[] }>();
+    for (const row of modelResult.data) {
+      if (!modelByWell.has(row.well_id)) modelByWell.set(row.well_id, { dates: [], values: [] });
+      const entry = modelByWell.get(row.well_id)!;
+      entry.dates.push(new Date(row.date).getTime());
+      entry.values.push(row.combined);
+    }
 
-    // Filter by min observations and min time span
-    if (sorted.length < Math.max(2, temporal.minObservations)) continue;
+    const modelWellIds = wells.map(w => w.id).filter(id => modelByWell.has(id));
 
-    const xValues = sorted.map(m => new Date(m.date).getTime());
-    const yValues = sorted.map(m => m.value);
-    const minT = xValues[0];
-    const maxT = xValues[xValues.length - 1];
+    for (let wi = 0; wi < modelWellIds.length; wi++) {
+      const wellId = modelWellIds[wi];
+      const well = wells.find(w => w.id === wellId)!;
+      const { dates: modelDates, values: modelValues } = modelByWell.get(wellId)!;
 
-    const timeSpanYears = (maxT - minT) / (365.25 * 24 * 60 * 60 * 1000);
-    if (timeSpanYears < temporal.minTimeSpan) continue;
+      onProgress(`Model interpolation well ${wi + 1}/${modelWellIds.length}...`, 5 + (wi / modelWellIds.length) * 25);
+      if (wi % 5 === 0) await yieldToUI();
 
-    // Interpolate within the well's data range (no extrapolation) using selected method
-    let interpValues: (number | null)[];
+      if (modelDates.length < 2) continue;
 
-    if (temporal.method === 'moving-average') {
-      const smoothed = kernelSmooth(xValues, yValues, intervalTimestamps, temporal.maWindow);
-      interpValues = intervalTimestamps.map((t, i) => {
-        if (t < minT || t > maxT) return null;
-        return smoothed[i];
-      });
-    } else {
-      // PCHIP or Linear
-      interpValues = intervalTimestamps.map(() => null);
+      const minT = modelDates[0];
+      const maxT = modelDates[modelDates.length - 1];
+
+      // PCHIP interpolate the monthly model data to the requested interval timestamps
       const validTargets: number[] = [];
       const validIndices: number[] = [];
       for (let i = 0; i < intervalTimestamps.length; i++) {
@@ -143,20 +142,80 @@ export async function runRasterAnalysis(
           validIndices.push(i);
         }
       }
+
+      const interpValues: (number | null)[] = intervalTimestamps.map(() => null);
       if (validTargets.length > 0) {
-        const interpolated = temporal.method === 'linear'
-          ? interpolateLinear(xValues, yValues, validTargets)
-          : interpolatePCHIP(xValues, yValues, validTargets);
+        const interpolated = interpolatePCHIP(modelDates, modelValues, validTargets);
         for (let i = 0; i < validIndices.length; i++) {
           interpValues[validIndices[i]] = interpolated[i];
         }
       }
-    }
 
-    wellInterp.set(wellId, { well, values: interpValues });
+      wellInterp.set(wellId, { well, values: interpValues });
+    }
+  } else {
+    // Standard temporal interpolation (pchip, linear, moving-average)
+    const wellIds = wells.map(w => w.id).filter(id => byWell.has(id));
+
+    for (let wi = 0; wi < wellIds.length; wi++) {
+      const wellId = wellIds[wi];
+      const well = wells.find(w => w.id === wellId)!;
+      const meas = byWell.get(wellId)!;
+
+      onProgress(`Interpolating well ${wi + 1}/${wellIds.length}...`, (wi / wellIds.length) * 30);
+      if (wi % 5 === 0) await yieldToUI();
+
+      const sorted = [...meas]
+        .filter(m => !isNaN(new Date(m.date).getTime()))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+      // Filter by min observations and min time span
+      if (sorted.length < Math.max(2, temporal.minObservations)) continue;
+
+      const xValues = sorted.map(m => new Date(m.date).getTime());
+      const yValues = sorted.map(m => m.value);
+      const minT = xValues[0];
+      const maxT = xValues[xValues.length - 1];
+
+      const timeSpanYears = (maxT - minT) / (365.25 * 24 * 60 * 60 * 1000);
+      if (timeSpanYears < temporal.minTimeSpan) continue;
+
+      // Interpolate within the well's data range (no extrapolation) using selected method
+      let interpValues: (number | null)[];
+
+      if (temporal.method === 'moving-average') {
+        const smoothed = kernelSmooth(xValues, yValues, intervalTimestamps, temporal.maWindow);
+        interpValues = intervalTimestamps.map((t, i) => {
+          if (t < minT || t > maxT) return null;
+          return smoothed[i];
+        });
+      } else {
+        // PCHIP or Linear
+        interpValues = intervalTimestamps.map(() => null);
+        const validTargets: number[] = [];
+        const validIndices: number[] = [];
+        for (let i = 0; i < intervalTimestamps.length; i++) {
+          const t = intervalTimestamps[i];
+          if (t >= minT && t <= maxT) {
+            validTargets.push(t);
+            validIndices.push(i);
+          }
+        }
+        if (validTargets.length > 0) {
+          const interpolated = temporal.method === 'linear'
+            ? interpolateLinear(xValues, yValues, validTargets)
+            : interpolatePCHIP(xValues, yValues, validTargets);
+          for (let i = 0; i < validIndices.length; i++) {
+            interpValues[validIndices[i]] = interpolated[i];
+          }
+        }
+      }
+
+      wellInterp.set(wellId, { well, values: interpValues });
+    }
   }
 
-  console.log(`[RasterAnalysis] ${wellInterp.size}/${wellIds.length} wells qualified (minObs=${temporal.minObservations}, minSpan=${temporal.minTimeSpan}yr)`);
+  console.log(`[RasterAnalysis] ${wellInterp.size}/${wells.length} wells qualified (method=${temporal.method}, minObs=${temporal.minObservations}, minSpan=${temporal.minTimeSpan}yr)`);
 
   // Apply log transform to well values before spatial interpolation
   if (general.logInterpolation) {
@@ -276,7 +335,7 @@ export async function runRasterAnalysis(
     title,
     minObservations: temporal.minObservations,
     minTimeSpanYears: temporal.minTimeSpan,
-    smoothingMethod: temporal.method,
+    smoothingMethod: temporal.method === 'model' ? 'pchip' : temporal.method,
     smoothingMonths: temporal.maWindow,
   };
 
