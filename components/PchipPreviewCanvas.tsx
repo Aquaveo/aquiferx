@@ -13,10 +13,11 @@ interface PchipPreviewCanvasProps {
   wteMeasurements: Measurement[];
   startTs?: number;
   endTs?: number;
+  gldasRange?: { min: number; max: number };
 }
 
 const PchipPreviewCanvas: React.FC<PchipPreviewCanvasProps> = ({
-  wells, wteMeasurements, startTs, endTs,
+  wells, wteMeasurements, startTs, endTs, gldasRange,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -107,6 +108,16 @@ const PchipPreviewCanvas: React.FC<PchipPreviewCanvasProps> = ({
     ctx.fillStyle = '#f8fafc';
     ctx.fillRect(0, 0, W, H);
 
+    // GLDAS range shading
+    if (gldasRange) {
+      const gx1 = Math.max(margin.left, toX(gldasRange.min));
+      const gx2 = Math.min(W - margin.right, toX(gldasRange.max));
+      if (gx2 > gx1) {
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.07)';
+        ctx.fillRect(gx1, margin.top, gx2 - gx1, plotH);
+      }
+    }
+
     // Grid lines
     ctx.strokeStyle = '#e2e8f0';
     ctx.lineWidth = 0.5;
@@ -180,7 +191,7 @@ const PchipPreviewCanvas: React.FC<PchipPreviewCanvasProps> = ({
       const py = margin.top + (i / 4) * plotH;
       ctx.fillText(val.toFixed(0), margin.left - 4, py + 3);
     }
-  }, [wellSeries, startTs, endTs]);
+  }, [wellSeries, startTs, endTs, gldasRange]);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => draw());

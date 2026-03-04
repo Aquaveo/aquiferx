@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { ImputationModelResult, Well, Measurement } from '../types';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { smoothModelCombined } from '../utils/interpolation';
 
 interface ModelTimeSeriesProps {
   model: ImputationModelResult;
@@ -13,10 +14,13 @@ interface ModelTimeSeriesProps {
   showCombined: boolean;
   onToggleCombined: () => void;
   lengthUnit: 'ft' | 'm';
+  showSmooth?: boolean;
+  smoothMonths?: number;
 }
 
 const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
   model, well, measurements, showCombined, onToggleCombined, lengthUnit,
+  showSmooth = false, smoothMonths = 3,
 }) => {
   const [logExpanded, setLogExpanded] = useState(false);
 
@@ -33,15 +37,32 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
     model.data.filter(r => r.well_id === well.id).sort((a, b) => a.date.localeCompare(b.date)),
   [model.data, well.id]);
 
+  // Compute smoothed combined data when in combined mode with smooth enabled
+  const smoothedData = useMemo(() => {
+    if (!showCombined || !showSmooth || modelRows.length < 2) return null;
+    const combinedRows = modelRows.map(row => ({
+      date: row.date,
+      combined: row.pchip !== null ? row.pchip : row.model,
+    }));
+    const { dates, values } = smoothModelCombined(combinedRows, smoothMonths);
+    const map = new Map<number, number>();
+    for (let i = 0; i < dates.length; i++) map.set(dates[i], values[i]);
+    return map;
+  }, [showCombined, showSmooth, smoothMonths, modelRows]);
+
   // Build chart data
   const chartData = useMemo(() => {
     if (showCombined) {
       // Combined view: red for PCHIP, blue for ELM
-      return modelRows.map(row => ({
-        date: new Date(row.date).getTime(),
-        pchip: row.pchip,
-        elm: row.pchip !== null ? null : row.model,
-      }));
+      return modelRows.map(row => {
+        const ts = new Date(row.date).getTime();
+        return {
+          date: ts,
+          pchip: row.pchip,
+          elm: row.pchip !== null ? null : row.model,
+          smooth: smoothedData?.get(ts) ?? null,
+        };
+      });
     } else {
       // Uncombined view: green dots for measurements, red/blue lines
       const dataMap = new Map<number, any>();
@@ -83,13 +104,13 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
 
       return Array.from(dataMap.values()).sort((a, b) => a.date - b.date);
     }
-  }, [modelRows, wteMeas, showCombined]);
+  }, [modelRows, wteMeas, showCombined, smoothedData]);
 
   // Compute tight Y domain from all values
   const yDomain = useMemo(() => {
     let min = Infinity, max = -Infinity;
     for (const d of chartData) {
-      for (const key of ['pchip', 'elm', 'model', 'measurement'] as const) {
+      for (const key of ['pchip', 'elm', 'model', 'measurement', 'smooth'] as const) {
         const v = d[key];
         if (v != null && isFinite(v)) {
           if (v < min) min = v;
@@ -175,7 +196,7 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
               labelFormatter={(ts: number) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }}
               formatter={(value: number, name: string) => [
                 value?.toFixed(2) ?? 'N/A',
-                name === 'measurement' ? 'Measured' : name === 'pchip' ? 'PCHIP' : name === 'elm' ? 'ELM' : name === 'model' ? 'ELM' : name
+                name === 'measurement' ? 'Measured' : name === 'pchip' ? 'PCHIP' : name === 'elm' ? 'ELM' : name === 'model' ? 'ELM' : name === 'smooth' ? 'MAvg' : name
               ]}
             />
 
@@ -201,6 +222,19 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
                   name="ELM"
                   animationDuration={400}
                 />
+                {smoothedData && (
+                  <Line
+                    type="monotone"
+                    dataKey="smooth"
+                    stroke="#f97316"
+                    strokeWidth={2}
+                    strokeDasharray="6 3"
+                    dot={false}
+                    connectNulls
+                    name="MAvg"
+                    animationDuration={400}
+                  />
+                )}
               </>
             ) : (
               <>
@@ -236,7 +270,7 @@ const ModelTimeSeries: React.FC<ModelTimeSeriesProps> = ({
               </>
             )}
 
-            {!showCombined && <Legend />}
+            {(!showCombined || smoothedData) && <Legend />}
           </ComposedChart>
         </ResponsiveContainer>
       </div>

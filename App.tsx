@@ -1560,25 +1560,29 @@ const App: React.FC = () => {
                             <input type="checkbox" checked={showTrendLine} onChange={(e) => setShowTrendLine(e.target.checked)} className="accent-blue-500" />
                             Trend Line
                           </label>
-                          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-                            <input type="checkbox" checked={showSmooth} onChange={(e) => setShowSmooth(e.target.checked)} className="accent-blue-500" />
-                            MAvg
-                          </label>
-                          {showSmooth && (
-                            <label className="flex items-center gap-1 text-xs text-slate-600 select-none">
-                              <span>months:</span>
-                              <input
-                                type="number"
-                                min={3}
-                                step={3}
-                                value={smoothMonths}
-                                onChange={(e) => {
-                                  const v = Math.max(3, Math.round(parseInt(e.target.value) / 3) * 3 || 3);
-                                  setSmoothMonths(v);
-                                }}
-                                className="w-12 border border-slate-300 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
-                              />
-                            </label>
+                          {!(selectedModel && selectedWells.length === 1 && !showCombinedModel) && (
+                            <>
+                              <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                                <input type="checkbox" checked={showSmooth} onChange={(e) => setShowSmooth(e.target.checked)} className="accent-blue-500" />
+                                MAvg
+                              </label>
+                              {showSmooth && (
+                                <label className="flex items-center gap-1 text-xs text-slate-600 select-none">
+                                  <span>months:</span>
+                                  <input
+                                    type="number"
+                                    min={3}
+                                    step={3}
+                                    value={smoothMonths}
+                                    onChange={(e) => {
+                                      const v = Math.max(3, Math.round(parseInt(e.target.value) / 3) * 3 || 3);
+                                      setSmoothMonths(v);
+                                    }}
+                                    className="w-12 border border-slate-300 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  />
+                                </label>
+                              )}
+                            </>
                           )}
                           <button
                             onClick={() => setIsDataEditorOpen(true)}
@@ -1681,8 +1685,15 @@ const App: React.FC = () => {
                         well={selectedWells[0]}
                         measurements={measurements}
                         showCombined={showCombinedModel}
-                        onToggleCombined={() => setShowCombinedModel(p => !p)}
+                        onToggleCombined={() => {
+                          setShowCombinedModel(p => {
+                            if (p) setShowSmooth(false); // reset smooth when switching to separated
+                            return !p;
+                          });
+                        }}
                         lengthUnit={selectedRegion?.lengthUnit || 'ft'}
+                        showSmooth={showSmooth}
+                        smoothMonths={smoothMonths}
                       />
                     ) : effectiveTab === 'waterLevel' ? (
                       <TimeSeriesChart

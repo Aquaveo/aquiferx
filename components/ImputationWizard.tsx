@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { X, ChevronLeft, ChevronRight, Play, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, Cell,
+  ResponsiveContainer, ReferenceLine, ReferenceArea, Cell,
 } from 'recharts';
 import { Aquifer, Region, Well, Measurement, ImputationModelResult } from '../types';
 import { runImputationPipeline, ImputationPipelineInput } from '../services/imputationPipeline';
@@ -63,7 +63,7 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
   [measurements, wellKeySet]);
 
   // Data density analysis (same as SpatialAnalysisDialog but with 3%/5 threshold)
-  const { densityData, defaultStartDate, defaultEndDate } = useMemo(() => {
+  const { densityData, defaultStartDate, defaultEndDate, gldasFirstLabel, gldasLastLabel } = useMemo(() => {
     const byWellDate = new Map<string, Set<string>>();
     for (const m of wteMeasurements) {
       if (!byWellDate.has(m.wellId)) byWellDate.set(m.wellId, new Set());
@@ -112,7 +112,19 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
     let defStart = gldasDateRange?.min ?? minDateStr;
     let defEnd = gldasDateRange?.max ?? maxDateStr;
 
-    return { densityData, defaultStartDate: defStart, defaultEndDate: defEnd };
+    // Compute GLDAS range bin labels for histogram highlight
+    let gldasFirstLabel: string | undefined;
+    let gldasLastLabel: string | undefined;
+    if (gldasDateRange) {
+      const gMin = new Date(gldasDateRange.min).getTime();
+      const gMax = new Date(gldasDateRange.max).getTime();
+      for (const b of densityData) {
+        if (b.startTs >= gMin && !gldasFirstLabel) gldasFirstLabel = b.label;
+        if (b.startTs <= gMax) gldasLastLabel = b.label;
+      }
+    }
+
+    return { densityData, defaultStartDate: defStart, defaultEndDate: defEnd, gldasFirstLabel, gldasLastLabel };
   }, [wteMeasurements, gldasDateRange]);
 
   const [startDate, setStartDate] = useState(defaultStartDate);
@@ -283,6 +295,7 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
                       wteMeasurements={wteMeasurements}
                       startTs={startTs}
                       endTs={endTs}
+                      gldasRange={gldasDateRange ? { min: new Date(gldasDateRange.min).getTime(), max: new Date(gldasDateRange.max).getTime() } : undefined}
                     />
                   </div>
                 </div>
@@ -298,6 +311,9 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="label" stroke="#94a3b8" fontSize={9} interval="preserveStartEnd" />
                         <YAxis stroke="#94a3b8" fontSize={10} />
+                        {gldasFirstLabel && gldasLastLabel && (
+                          <ReferenceArea x1={gldasFirstLabel} x2={gldasLastLabel} {...{ fill: '#3b82f6', fillOpacity: 0.08 } as any} />
+                        )}
                         <ReferenceLine y={5} stroke="#f59e0b" strokeDasharray="4 3" strokeWidth={1.5} />
                         <Tooltip
                           content={({ payload }) => {
@@ -331,25 +347,69 @@ const ImputationWizard: React.FC<ImputationWizardProps> = ({
                 <div>
                   <label className={labelCls}>Output Start Date</label>
                   <div className="flex items-center gap-1">
-                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className={inputCls + ' flex-1'} />
-                    <button type="button" className="p-1 text-slate-400 hover:text-slate-700" onClick={() => { const y = parseInt(startDate); if (!isNaN(y)) setStartDate(`${y - 1}-01-01`); }}>
-                      <svg width="14" height="14" viewBox="0 0 14 14"><path d="M9 2L4 7l5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                    </button>
-                    <button type="button" className="p-1 text-slate-400 hover:text-slate-700" onClick={() => { const y = parseInt(startDate); if (!isNaN(y)) setStartDate(`${y + 1}-01-01`); }}>
-                      <svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 2l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                    </button>
+                    <input type="date" value={startDate}
+                      min={gldasDateRange?.min}
+                      max={endDate || gldasDateRange?.max}
+                      onChange={e => {
+                        let v = e.target.value;
+                        if (gldasDateRange && v < gldasDateRange.min) v = gldasDateRange.min;
+                        setStartDate(v);
+                      }}
+                      className={inputCls + ' flex-1'} />
+                    {!(gldasDateRange && startDate <= gldasDateRange.min) && (
+                      <button type="button" className="p-1 text-slate-400 hover:text-slate-700" onClick={() => {
+                        const y = parseInt(startDate); if (isNaN(y)) return;
+                        let next = `${y - 1}-01-01`;
+                        if (gldasDateRange && next < gldasDateRange.min) next = gldasDateRange.min;
+                        setStartDate(next);
+                      }}>
+                        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M9 2L4 7l5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      </button>
+                    )}
+                    {!(gldasDateRange && startDate >= gldasDateRange.max) && (
+                      <button type="button" className="p-1 text-slate-400 hover:text-slate-700" onClick={() => {
+                        const y = parseInt(startDate); if (isNaN(y)) return;
+                        let next = `${y + 1}-01-01`;
+                        if (gldasDateRange && next > gldasDateRange.max) next = gldasDateRange.max;
+                        setStartDate(next);
+                      }}>
+                        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 2l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div>
                   <label className={labelCls}>Output End Date</label>
                   <div className="flex items-center gap-1">
-                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className={inputCls + ' flex-1'} />
-                    <button type="button" className="p-1 text-slate-400 hover:text-slate-700" onClick={() => { const y = parseInt(endDate); if (!isNaN(y)) setEndDate(`${y - 1}-01-01`); }}>
-                      <svg width="14" height="14" viewBox="0 0 14 14"><path d="M9 2L4 7l5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                    </button>
-                    <button type="button" className="p-1 text-slate-400 hover:text-slate-700" onClick={() => { const y = parseInt(endDate); if (!isNaN(y)) setEndDate(`${y + 1}-01-01`); }}>
-                      <svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 2l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                    </button>
+                    <input type="date" value={endDate}
+                      min={startDate || gldasDateRange?.min}
+                      max={gldasDateRange?.max}
+                      onChange={e => {
+                        let v = e.target.value;
+                        if (gldasDateRange && v > gldasDateRange.max) v = gldasDateRange.max;
+                        setEndDate(v);
+                      }}
+                      className={inputCls + ' flex-1'} />
+                    {!(gldasDateRange && endDate <= gldasDateRange.min) && (
+                      <button type="button" className="p-1 text-slate-400 hover:text-slate-700" onClick={() => {
+                        const y = parseInt(endDate); if (isNaN(y)) return;
+                        let next = `${y - 1}-01-01`;
+                        if (gldasDateRange && next < gldasDateRange.min) next = gldasDateRange.min;
+                        setEndDate(next);
+                      }}>
+                        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M9 2L4 7l5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      </button>
+                    )}
+                    {!(gldasDateRange && endDate >= gldasDateRange.max) && (
+                      <button type="button" className="p-1 text-slate-400 hover:text-slate-700" onClick={() => {
+                        const y = parseInt(endDate); if (isNaN(y)) return;
+                        let next = `${y + 1}-01-01`;
+                        if (gldasDateRange && next > gldasDateRange.max) next = gldasDateRange.max;
+                        setEndDate(next);
+                      }}>
+                        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 2l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      </button>
+                    )}
                   </div>
                 </div>
 

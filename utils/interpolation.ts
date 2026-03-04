@@ -183,6 +183,29 @@ export function kernelSmooth(
 }
 
 /**
+ * Smooth the combined (PCHIP + model) series from ModelTimeSeries rows.
+ * Reusable for spatial analysis integration.
+ *
+ * @param rows - pre-sorted rows with date (ISO string) and combined value
+ * @param smoothMonths - bandwidth in months for kernelSmooth
+ * @returns parallel arrays of timestamps and smoothed values
+ */
+export function smoothModelCombined(
+  rows: { date: string; combined: number }[],
+  smoothMonths: number
+): { dates: number[]; values: number[] } {
+  if (rows.length < 2) {
+    const dates = rows.map(r => new Date(r.date).getTime());
+    const values = rows.map(r => r.combined);
+    return { dates, values };
+  }
+  const dates = rows.map(r => new Date(r.date).getTime());
+  const values = rows.map(r => r.combined);
+  const smoothed = kernelSmooth(dates, values, dates, smoothMonths);
+  return { dates, values: smoothed };
+}
+
+/**
  * Compute the one-sided derivative at an endpoint for PCHIP.
  * Uses the "not-a-knot" style endpoint condition from scipy.
  */
