@@ -13,6 +13,11 @@
       "code": "salt",
       "name": "Salinity",
       "unit": "mg/L"
+    },
+    {
+      "code": "tce",
+      "name": "Trichloroethane",
+      "unit": "PPM"
     }
   ]
 }
