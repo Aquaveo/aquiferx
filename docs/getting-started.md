@@ -35,6 +35,32 @@ After installing, verify Git is available by running:
 
     git --version
 
+### Installing Node.js
+
+AquiferX requires Node.js 18 or later. If you don't have it installed, follow the instructions for your operating system:
+
+=== "Windows"
+
+1. Download the **LTS** installer from [nodejs.org](https://nodejs.org/).
+2. Run the installer and accept the default settings (this also installs **npm**).
+3. Open **Command Prompt** or **PowerShell** and verify:
+
+        node --version
+        npm --version
+
+=== "macOS"
+
+Option A — Download the **LTS** installer from [nodejs.org](https://nodejs.org/) and follow the prompts.
+
+Option B — Install via [Homebrew](https://brew.sh/):
+
+    brew install node
+
+After installing, verify in **Terminal**:
+
+    node --version
+    npm --version
+
 ## Installation
 
 1. **Clone the repository**:
