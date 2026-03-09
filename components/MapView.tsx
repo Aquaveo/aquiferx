@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useMemo, useState, forwardRef, useImperativeHandle } from 'react';
 import L from 'leaflet';
-import { Layers, ChevronRight } from 'lucide-react';
+import { Layers, ChevronRight, Search } from 'lucide-react';
 import { Region, Aquifer, Well, Measurement } from '../types';
 import { isPointInGeoJSON } from '../utils/geo';
 
@@ -60,6 +60,7 @@ interface MapViewProps {
   onWellClick: (w: Well, shiftKey: boolean) => void;
   onWellBoxSelect: (wells: Well[]) => void;
   onShowWellsChange?: (show: boolean) => void;
+  onShowWellIdsChange?: (show: boolean) => void;
 }
 
 export interface MapViewHandle {
@@ -82,7 +83,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
   onAquiferClick,
   onWellClick,
   onWellBoxSelect,
-  onShowWellsChange
+  onShowWellsChange,
+  onShowWellIdsChange
 }, ref) => {
   // Count measurements per well for the active data type (keyed by regionId:aquiferId:wellId)
   const wellMeasurementCounts = useMemo(() => {
@@ -158,7 +160,72 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
     onShowWellsChange?.(showWells);
   }, [showWells, onShowWellsChange]);
 
+  useEffect(() => {
+    onShowWellIdsChange?.(showWellIds);
+  }, [showWellIds, onShowWellIdsChange]);
+
   // Box-drag selection state
+  // Well search state
+  const [wellSearchQuery, setWellSearchQuery] = useState('');
+  const [wellSearchFocused, setWellSearchFocused] = useState(false);
+  const [wellSearchHighlight, setWellSearchHighlight] = useState(-1);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchDropdownRef = useRef<HTMLDivElement>(null);
+
+  const wellSearchMatches = useMemo(() => {
+    if (!wellSearchQuery.trim() || !selectedAquifer) return [];
+    const q = wellSearchQuery.toLowerCase();
+    return visibleWellsRef.current
+      .filter(w => w.name.toLowerCase().includes(q) || w.id.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [wellSearchQuery, selectedAquifer, wells, minObs]);
+
+  const flashWellRef = useRef<L.Marker | null>(null);
+
+  const selectSearchedWell = (well: Well) => {
+    onWellClick(well, false);
+    const map = mapRef.current;
+    if (map) {
+      // Remove any previous flash marker
+      if (flashWellRef.current) {
+        flashWellRef.current.remove();
+        flashWellRef.current = null;
+      }
+
+      // Delay flyTo so layout settles after chart panel appears
+      requestAnimationFrame(() => {
+        map.invalidateSize();
+        map.flyTo([well.lat, well.lng], Math.max(map.getZoom(), 14), { duration: 1 });
+
+        // Add a pulsing ring after the fly animation settles
+        setTimeout(() => {
+          if (!mapRef.current) return;
+          const flash = L.marker([well.lat, well.lng], {
+            interactive: false,
+            icon: L.divIcon({
+              className: '',
+              html: `<div class="well-search-pulse"></div>`,
+              iconSize: [0, 0],
+              iconAnchor: [0, 0],
+            }),
+          }).addTo(mapRef.current);
+          flashWellRef.current = flash;
+          setTimeout(() => { flash.remove(); flashWellRef.current = null; }, 2400);
+        }, 1100);
+      });
+    }
+    setWellSearchQuery('');
+    setWellSearchFocused(false);
+    setWellSearchHighlight(-1);
+    searchInputRef.current?.blur();
+  };
+
+  // Clear search when aquifer changes
+  useEffect(() => {
+    setWellSearchQuery('');
+    setWellSearchHighlight(-1);
+  }, [selectedAquifer]);
+
   const [shiftHeld, setShiftHeld] = useState(false);
   const [boxDrag, setBoxDrag] = useState<{ startX: number; startY: number; curX: number; curY: number } | null>(null);
 
@@ -588,6 +655,62 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
                 pointerEvents: 'none',
               }}
             />
+          )}
+        </div>
+      )}
+
+      {/* Well Search */}
+      {selectedAquifer && (
+        <div className="absolute top-3 left-14 z-[500]" style={{ width: '260px' }}>
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search wells..."
+              value={wellSearchQuery}
+              onChange={(e) => { setWellSearchQuery(e.target.value); setWellSearchHighlight(-1); }}
+              onFocus={() => setWellSearchFocused(true)}
+              onBlur={() => { setTimeout(() => setWellSearchFocused(false), 150); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setWellSearchQuery('');
+                  setWellSearchFocused(false);
+                  searchInputRef.current?.blur();
+                } else if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setWellSearchHighlight(prev => Math.min(prev + 1, wellSearchMatches.length - 1));
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setWellSearchHighlight(prev => Math.max(prev - 1, 0));
+                } else if (e.key === 'Enter' && wellSearchMatches.length > 0) {
+                  e.preventDefault();
+                  const idx = wellSearchHighlight >= 0 ? wellSearchHighlight : 0;
+                  selectSearchedWell(wellSearchMatches[idx]);
+                }
+              }}
+              className="w-full pl-8 pr-3 py-1.5 text-sm bg-white border border-slate-300 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+            />
+          </div>
+          {wellSearchFocused && wellSearchQuery.trim() && (
+            <div ref={searchDropdownRef} className="mt-1 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-64 overflow-y-auto">
+              {wellSearchMatches.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-slate-400">No matching wells</div>
+              ) : (
+                wellSearchMatches.map((w, i) => (
+                  <button
+                    key={w.id}
+                    onMouseDown={(e) => { e.preventDefault(); selectSearchedWell(w); }}
+                    className={`w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 flex flex-col ${
+                      i === wellSearchHighlight ? 'bg-blue-50' : ''
+                    }`}
+                  >
+                    <span className="font-medium text-slate-800 truncate">{w.name}</span>
+                    <span className="text-xs text-slate-400 truncate">ID: {w.id}</span>
+                  </button>
+                ))
+              )}
+            </div>
           )}
         </div>
       )}

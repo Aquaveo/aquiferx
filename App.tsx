@@ -214,6 +214,7 @@ const App: React.FC = () => {
   const [aquiferTrendColors, setAquiferTrendColors] = useState<Map<string, string> | null>(null);
   const [showTrends, setShowTrends] = useState(false);
   const [showWellsOnMap, setShowWellsOnMap] = useState(true);
+  const [showWellIdsOnMap, setShowWellIdsOnMap] = useState(false);
   const [trendWindowYears, setTrendWindowYears] = useState(10);
   const [selectedDataType, setSelectedDataType] = useState<string>('wte');
   const [visibleRegionIds, setVisibleRegionIds] = useState<Set<string>>(new Set());
@@ -1401,6 +1402,7 @@ const App: React.FC = () => {
               onWellClick={handleWellClick}
               onWellBoxSelect={handleWellBoxSelect}
               onShowWellsChange={setShowWellsOnMap}
+              onShowWellIdsChange={setShowWellIdsOnMap}
             />
             {/* Well legend — shown when aquifer selected, wells visible, and trends not active */}
             {selectedAquifer && showWellsOnMap && !(showTrends && (trendColors || aquiferTrendColors)) && (
@@ -1555,7 +1557,7 @@ const App: React.FC = () => {
                           <h3 className="font-bold text-slate-800">
                             {activeDataType.name}: {
                               selectedWells.length <= 3
-                                ? selectedWells.map(w => w.name).join(', ')
+                                ? selectedWells.map(w => showWellIdsOnMap ? `${w.name} (${w.id})` : w.name).join(', ')
                                 : `${selectedWells.length} wells selected`
                             }
                           </h3>
@@ -1960,7 +1962,7 @@ const App: React.FC = () => {
           onClose={() => setIsChartExpanded(false)}
           title={`${activeDataType.name}: ${
             selectedWells.length <= 3
-              ? selectedWells.map(w => w.name).join(', ')
+              ? selectedWells.map(w => showWellIdsOnMap ? `${w.name} (${w.id})` : w.name).join(', ')
               : `${selectedWells.length} wells selected`
           }`}
           subtitle={`Units: ${activeDataType.unit === 'm' ? 'Meters' : activeDataType.unit === 'ft' ? 'Feet' : activeDataType.unit} (${activeDataType.code.toUpperCase()})`}

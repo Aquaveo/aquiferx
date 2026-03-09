@@ -1,0 +1,28 @@
+/* Pulse animation for well search result */
+.well-search-pulse {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.6);
+  box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  animation: well-pulse 0.3s ease-out 3;
+}
+
+@keyframes well-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    background: rgba(239, 68, 68, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 30px rgba(239, 68, 68, 0);
+    background: rgba(239, 68, 68, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    background: rgba(239, 68, 68, 0.6);
+  }
+}
