@@ -210,7 +210,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
             }),
           }).addTo(mapRef.current);
           flashWellRef.current = flash;
-          setTimeout(() => { flash.remove(); flashWellRef.current = null; }, 2400);
+          setTimeout(() => { flash.remove(); flashWellRef.current = null; }, 1200);
         }, 1100);
       });
     }
