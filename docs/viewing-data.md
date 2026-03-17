@@ -116,7 +116,7 @@ If the selected well has a ground surface elevation value, you can enable a **GS
 
 ### Trend Lines
 
-When enabled, a linear regression trend line is computed for each selected well (requires at least 3 measurements). You can set a **Trend Window** start date to compute trends only over a recent period.
+When enabled, a linear regression trend line is computed for each selected well (requires at least 2 measurements within the window). The trend uses the most recent X years from the current date (default: 30 years), and the chart x-axis and trend line span the full window.
 
 ### Smoothing
 

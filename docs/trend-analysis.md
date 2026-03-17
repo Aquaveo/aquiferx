@@ -23,11 +23,13 @@ y = mx + b
 
 where \(x\) is time (in years) and \(y\) is the measurement value. The slope \(m\) represents the average rate of change per year in the region's length unit (ft/year or m/year).
 
-Wells with fewer than **3 measurements** cannot produce a reliable trend and are marked as "Insufficient Data."
+Wells with fewer than **2 measurements** within the trend window cannot produce a reliable trend and are marked as "Insufficient Data."
 
 ### Trend Window
 
-By default, the trend is computed over the full measurement history of each well. You can set a **Trend Window** start date to limit the computation to a recent period — useful for detecting changes in trend direction. Only measurements on or after the start date are used.
+The trend is computed over the **most recent X years** from the current date. For example, with the default 30-year window and a current year of 2026, only measurements from 1996–2026 are used. You can adjust the window in 5-year increments using the controls next to the Trend button.
+
+When trend analysis is active, the time series chart automatically adjusts its x-axis to display the entire trend window, and the trend line extends across the full window period.
 
 ## Trend Categories
 
@@ -42,7 +44,7 @@ Wells are classified into five categories based on their slope value. The thresh
 | Static | Yellow | −0.5 to +0.5 |
 | Increase | Light Blue | +0.5 to +2.0 |
 | Extreme Increase | Blue | > +2.0 |
-| Insufficient Data | Dark Gray | Fewer than 3 measurements |
+| Insufficient Data | Dark Gray | Fewer than 2 measurements in window |
 
 ### Thresholds for Regions in Meters
 
@@ -53,7 +55,7 @@ Wells are classified into five categories based on their slope value. The thresh
 | Static | Yellow | −0.15 to +0.15 |
 | Increase | Light Blue | +0.15 to +0.6 |
 | Extreme Increase | Blue | > +0.6 |
-| Insufficient Data | Dark Gray | Fewer than 3 measurements |
+| Insufficient Data | Dark Gray | Fewer than 2 measurements in window |
 
 ## Aquifer-Level Trends
 
@@ -86,11 +88,11 @@ Aquifer-level trends are displayed as color-coded aquifer polygons on the map wh
 - **Declining trends** (red/orange) indicate falling water levels, which may suggest over-pumping, drought, or reduced recharge.
 - **Static trends** (yellow) indicate relatively stable conditions.
 - **Increasing trends** (blue/light blue) indicate rising water levels, which may reflect increased recharge, reduced pumping, or recovery.
-- **Insufficient data** (dark gray) means the well has fewer than 3 measurements and a reliable trend cannot be determined.
+- **Insufficient data** (dark gray) means the well has fewer than 2 measurements within the trend window and a reliable trend cannot be determined.
 
 !!! tip
-    Use the trend window to focus on recent conditions. A well might show a long-term decline but a recent increase, or vice versa. Adjusting the trend window start date lets you distinguish between these patterns.
+    Use the trend window to focus on recent conditions. A well might show a long-term decline but a recent increase, or vice versa. Adjusting the window length lets you distinguish between these patterns.
 
 ## Trend Lines on the Chart
 
-When trend mode is active and a well is selected, the time series chart overlays a straight trend line on the data. If a trend window is set, the trend line is computed and drawn only from the window start date forward.
+When trend mode is active and a well is selected, the time series chart overlays a straight trend line spanning the full trend window. The regression is fit using only the measurements within the window, and the line extends from the window start to the current date.
