@@ -44,7 +44,7 @@ const MS_PER_YEAR = 365.25 * 86400000;
 const STORAGE_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
 function computeSlope(meas: Measurement[]): number | null {
-  if (meas.length < 3) return null;
+  if (meas.length < 2) return null;
   let n = 0, sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
   for (const m of meas) {
     const x = new Date(m.date).getTime() / MS_PER_YEAR;
@@ -216,7 +216,7 @@ const App: React.FC = () => {
   const [showWellsOnMap, setShowWellsOnMap] = useState(true);
   const [dateFilter, setDateFilter] = useState<{ minYear: number; maxYear: number } | null>(null);
   const [showWellIdsOnMap, setShowWellIdsOnMap] = useState(false);
-  const [trendWindowYears, setTrendWindowYears] = useState(10);
+  const [trendWindowYears, setTrendWindowYears] = useState(30);
   const [selectedDataType, setSelectedDataType] = useState<string>('wte');
   const [visibleRegionIds, setVisibleRegionIds] = useState<Set<string>>(new Set());
   const [rasterDialogOpen, setRasterDialogOpen] = useState(false);
@@ -337,14 +337,14 @@ const App: React.FC = () => {
   // Compute the data time range (in years) for the selected region/data type
   const dataTimeRangeYears = useMemo(() => {
     if (!selectedRegion) return 0;
-    let minT = Infinity, maxT = -Infinity;
+    let minT = Infinity;
     for (const m of measurements) {
       if (m.dataType !== selectedDataType) continue;
       const t = new Date(m.date).getTime();
-      if (!isNaN(t)) { if (t < minT) minT = t; if (t > maxT) maxT = t; }
+      if (!isNaN(t) && t < minT) minT = t;
     }
     if (!isFinite(minT)) return 0;
-    return (maxT - minT) / MS_PER_YEAR;
+    return (Date.now() - minT) / MS_PER_YEAR;
   }, [selectedRegion, measurements, selectedDataType]);
 
   const trendWindowMax = Math.max(5, Math.ceil(dataTimeRangeYears / 5) * 5);

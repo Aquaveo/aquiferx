@@ -173,7 +173,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
     return { chartData: data, wellIds: orderedWellIds };
   }, [measurements, selectedWells, usePCHIP]);
 
-  // Compute linear regression trend lines per well (requires >= 3 measurements)
+  // Compute linear regression trend lines per well (requires >= 2 measurements)
   const trendData = useMemo(() => {
     if (!showTrendLine || measurements.length === 0 || selectedWells.length === 0) return null;
 
@@ -191,7 +191,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
     const lines = new Map<string, { startDate: number; startVal: number; endDate: number; endVal: number; slopePerYear: number }>();
 
     for (const [wellId, points] of byWell) {
-      if (points.length < 3) continue;
+      if (points.length < 2) continue;
 
       // Linear regression: y = mx + b
       const n = points.length;
@@ -208,9 +208,9 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
       const m = (n * sumXY - sumX * sumY) / denom;
       const b = (sumY - m * sumX) / n;
 
-      const xs = points.map(p => p.x).sort((a, b) => a - b);
-      const startDate = xs[0];
-      const endDate = xs[xs.length - 1];
+      // Extend trend line over the full window when trendWindowStart is set
+      const startDate = trendWindowStart !== undefined ? trendWindowStart : Math.min(...points.map(p => p.x));
+      const endDate = trendWindowStart !== undefined ? Date.now() : Math.max(...points.map(p => p.x));
       lines.set(wellId, {
         startDate,
         startVal: m * startDate + b,
@@ -562,11 +562,13 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
             type="number"
             domain={zoomLeft != null && zoomRight != null
               ? [zoomLeft, zoomRight]
-              : rasterTimeRange
-                ? (() => { const range = rasterTimeRange[1] - rasterTimeRange[0]; const pad = range * 0.02; return [rasterTimeRange[0] - pad, rasterTimeRange[1] + pad]; })()
-                : finalChartData.length > 0
-                  ? (() => { const range = (finalChartData[finalChartData.length - 1].date as number) - (finalChartData[0].date as number); const pad = range * 0.02; return [finalChartData[0].date as number - pad, finalChartData[finalChartData.length - 1].date as number + pad]; })()
-                  : ['auto', 'auto']}
+              : trendWindowStart !== undefined
+                ? (() => { const range = Date.now() - trendWindowStart; const pad = range * 0.02; return [trendWindowStart - pad, Date.now() + pad]; })()
+                : rasterTimeRange
+                  ? (() => { const range = rasterTimeRange[1] - rasterTimeRange[0]; const pad = range * 0.02; return [rasterTimeRange[0] - pad, rasterTimeRange[1] + pad]; })()
+                  : finalChartData.length > 0
+                    ? (() => { const range = (finalChartData[finalChartData.length - 1].date as number) - (finalChartData[0].date as number); const pad = range * 0.02; return [finalChartData[0].date as number - pad, finalChartData[finalChartData.length - 1].date as number + pad]; })()
+                    : ['auto', 'auto']}
             allowDataOverflow={zoomLeft != null}
             tickFormatter={formatXAxis}
             stroke="#475569"
