@@ -10,14 +10,94 @@
       "unit": "m"
     },
     {
-      "code": "salt",
-      "name": "Salinity",
+      "code": "ph",
+      "name": "pH",
+      "unit": ""
+    },
+    {
+      "code": "conductivity",
+      "name": "Conductivity",
+      "unit": "µS/cm"
+    },
+    {
+      "code": "bod5",
+      "name": "BOD5",
       "unit": "mg/L"
     },
     {
-      "code": "tce",
-      "name": "Trichloroethane",
-      "unit": "PPM"
+      "code": "tds",
+      "name": "TDS",
+      "unit": "mg/L"
+    },
+    {
+      "code": "hardness",
+      "name": "Hardness",
+      "unit": "mg/L"
+    },
+    {
+      "code": "chloride",
+      "name": "Chloride",
+      "unit": "mg/L"
+    },
+    {
+      "code": "flouride",
+      "name": "Flouride",
+      "unit": "mg/L"
+    },
+    {
+      "code": "sulphate",
+      "name": "Sulphate",
+      "unit": "mg/L"
+    },
+    {
+      "code": "calcium",
+      "name": "Calcium",
+      "unit": "mg/L"
+    },
+    {
+      "code": "iron",
+      "name": "Iron",
+      "unit": "mg/L"
+    },
+    {
+      "code": "magnesium",
+      "name": "Magnesium",
+      "unit": "mg/L"
+    },
+    {
+      "code": "manganese",
+      "name": "Manganese",
+      "unit": "mg/L"
+    },
+    {
+      "code": "potassium",
+      "name": "Potassium",
+      "unit": "mg/L"
+    },
+    {
+      "code": "sodium",
+      "name": "Sodium",
+      "unit": "mg/L"
+    },
+    {
+      "code": "ammonia",
+      "name": "Ammonia",
+      "unit": "mg/L"
+    },
+    {
+      "code": "nitrate",
+      "name": "Nitrate",
+      "unit": "mg/L"
+    },
+    {
+      "code": "fc",
+      "name": "FC",
+      "unit": "CFU/100mL"
+    },
+    {
+      "code": "tc",
+      "name": "TC",
+      "unit": "mg/L"
     }
   ]
 }
