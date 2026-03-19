@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, MapPin, Layers, Navigation, BarChart3, Plus, Settings, Download, Upload, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { X, MapPin, Layers, Navigation, BarChart3, Plus, Settings, Download, Upload, Loader2, CheckCircle2, AlertTriangle, Pencil } from 'lucide-react';
 import JSZip from 'jszip';
 import { RegionMeta, DataType } from '../../types';
 import { freshFetch, saveFiles } from '../../services/importUtils';
@@ -8,6 +8,7 @@ import AquiferImporter from './AquiferImporter';
 import WellImporter from './WellImporter';
 import MeasurementImporter from './MeasurementImporter';
 import DataTypeEditor from './DataTypeEditor';
+import RegionEditor from './RegionEditor';
 
 interface ImportDataHubProps {
   onClose: () => void;
@@ -100,6 +101,7 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
   const [regionList, setRegionList] = useState<RegionInfo[]>([]);
   const [activeRegionId, setActiveRegionId] = useState<string | null>(initialRegionId || null);
   const [activeWizard, setActiveWizard] = useState<'region' | 'aquifer' | 'well' | 'measurement' | 'datatypes' | null>(null);
+  const [showRegionEditor, setShowRegionEditor] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   // Database export/import state
@@ -341,12 +343,22 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
               <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400 flex items-center gap-2">
                 <MapPin size={14} /> Regions
               </h3>
-              <button
-                onClick={() => setActiveWizard('region')}
-                className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-xs font-medium hover:bg-blue-100 transition-colors"
-              >
-                <Plus size={14} /> Add Region
-              </button>
+              <div className="flex items-center gap-2">
+                {regionList.length > 0 && (
+                  <button
+                    onClick={() => setShowRegionEditor(true)}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-slate-100 text-slate-600 rounded-md text-xs font-medium hover:bg-slate-200 transition-colors"
+                  >
+                    <Pencil size={14} /> Edit Regions
+                  </button>
+                )}
+                <button
+                  onClick={() => setActiveWizard('region')}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-xs font-medium hover:bg-blue-100 transition-colors"
+                >
+                  <Plus size={14} /> Add Region
+                </button>
+              </div>
             </div>
 
             {isLoading ? (
@@ -639,6 +651,13 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
           singleUnit={activeRegion.singleUnit}
           onUpdate={() => { loadRegions(); onDataChanged(); }}
           onClose={() => setActiveWizard(null)}
+        />
+      )}
+      {showRegionEditor && (
+        <RegionEditor
+          regions={regionList}
+          onSave={() => { loadRegions(); onDataChanged(); }}
+          onClose={() => setShowRegionEditor(false)}
         />
       )}
     </div>
