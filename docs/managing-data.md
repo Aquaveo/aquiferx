@@ -10,7 +10,7 @@ The hub follows a **hub-and-spoke** pattern. It displays a list of your existing
 
 The workflow is hierarchical — you must have a region before you can add aquifers, aquifers before wells (in multi-unit regions), and wells before measurements:
 
-1. **Region** — Create or import a region
+1. **Region** — Create, import, edit, or delete a region
 2. **Aquifer** — Upload aquifer boundaries (multi-unit regions only)
 3. **Well** — Upload well locations or download from USGS
 4. **Measurement** — Upload measurement data or download from USGS
@@ -51,6 +51,21 @@ The hub also supports full database operations:
 
 - **Export Database** — Downloads a ZIP containing all regions and their data files.
 - **Import Database** — Upload a ZIP to restore regions. Choose **Append** mode (skip existing regions by name) or **Replace** mode (delete all existing data first).
+
+## Editing Regions
+
+Click **Edit Regions** next to the Add Region button to open the region editor. This button appears when at least one region exists.
+
+The editor displays a table of all regions with editable fields:
+
+- **Name** — Edit the region's display name. Names must be non-empty and unique.
+- **Length Unit** — Switch between feet and meters.
+- **Delete** — Click the red trash can icon to delete a region. A confirmation dialog warns that this is irreversible and will permanently remove all aquifers, wells, and measurements associated with the region. A progress bar is shown while the deletion runs.
+
+Name and unit changes are not applied until you click **Save**. Deletions take effect immediately upon confirmation. Click **Cancel** to discard unsaved name and unit changes.
+
+!!! note
+    Renaming a region changes its display name only. The internal folder ID (derived from the original name) is not affected.
 
 ## Aquifer Import
 
