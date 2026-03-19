@@ -11,7 +11,7 @@ The hub follows a **hub-and-spoke** pattern. It displays a list of your existing
 The workflow is hierarchical — you must have a region before you can add aquifers, aquifers before wells (in multi-unit regions), and wells before measurements:
 
 1. **Region** — Create, import, edit, or delete a region
-2. **Aquifer** — Upload aquifer boundaries (multi-unit regions only)
+2. **Aquifer** — Upload, edit, or delete aquifer boundaries (multi-unit regions only)
 3. **Well** — Upload well locations or download from USGS
 4. **Measurement** — Upload measurement data or download from USGS
 5. **Data Types** — Create and manage custom measurement types
@@ -75,6 +75,17 @@ Upload a GeoJSON or shapefile (ZIP) containing one or more polygon features. Eac
 
 !!! note
     In single-unit regions, the aquifer section is dimmed. A single aquifer is automatically created from the region boundary with `aquifer_id = 0`.
+
+## Editing Aquifers
+
+For multi-unit regions, click the pencil icon in the aquifer card to open the aquifer editor. This button appears when the selected region has at least one aquifer.
+
+The editor displays a table of aquifers for the current region:
+
+- **Name** — Edit the aquifer's display name. Names must be non-empty and unique.
+- **Delete** — Click the red trash can icon to delete an aquifer. A confirmation dialog warns that this is irreversible and will permanently remove all wells and measurements associated with the aquifer. A progress bar is shown while the deletion runs.
+
+Name changes are not applied until you click **Save**. Deletions take effect immediately upon confirmation.
 
 ## Well Import
 

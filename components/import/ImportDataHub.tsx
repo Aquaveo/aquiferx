@@ -9,6 +9,7 @@ import WellImporter from './WellImporter';
 import MeasurementImporter from './MeasurementImporter';
 import DataTypeEditor from './DataTypeEditor';
 import RegionEditor from './RegionEditor';
+import AquiferEditor from './AquiferEditor';
 
 interface ImportDataHubProps {
   onClose: () => void;
@@ -102,6 +103,7 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
   const [activeRegionId, setActiveRegionId] = useState<string | null>(initialRegionId || null);
   const [activeWizard, setActiveWizard] = useState<'region' | 'aquifer' | 'well' | 'measurement' | 'datatypes' | null>(null);
   const [showRegionEditor, setShowRegionEditor] = useState(false);
+  const [showAquiferEditor, setShowAquiferEditor] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   // Database export/import state
@@ -397,12 +399,23 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
               {isSingleUnit ? (
                 <p className="text-xs text-slate-400 italic">Single-unit mode</p>
               ) : (
-                <button
-                  onClick={() => setActiveWizard('aquifer')}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-md text-xs font-medium hover:bg-indigo-100 transition-colors w-full justify-center"
-                >
-                  <Plus size={14} /> Add Aquifers
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setActiveWizard('aquifer')}
+                    className="flex-1 flex items-center gap-1 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-md text-xs font-medium hover:bg-indigo-100 transition-colors justify-center"
+                  >
+                    <Plus size={14} /> Add
+                  </button>
+                  {(activeRegion?.aquiferCount || 0) > 0 && (
+                    <button
+                      onClick={() => setShowAquiferEditor(true)}
+                      className="p-1.5 bg-slate-100 text-slate-500 rounded-md hover:bg-slate-200 hover:text-slate-700 transition-colors"
+                      title="Edit Aquifers"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  )}
+                </div>
               )}
             </div>
 
@@ -658,6 +671,15 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
           regions={regionList}
           onSave={() => { loadRegions(); onDataChanged(); }}
           onClose={() => setShowRegionEditor(false)}
+        />
+      )}
+      {showAquiferEditor && activeRegion && (
+        <AquiferEditor
+          regionId={activeRegion.id}
+          regionName={activeRegion.name}
+          dataTypes={activeRegion.dataTypes}
+          onSave={() => { loadRegions(); onDataChanged(); }}
+          onClose={() => setShowAquiferEditor(false)}
         />
       )}
     </div>
