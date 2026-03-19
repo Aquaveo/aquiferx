@@ -536,6 +536,14 @@ The same pattern applies to all child tables in the `aquifer` schema. Hydroviewe
 
 The abstraction layer is the key architectural piece that enables both cloud and local modes. Components never call Supabase or fetch APIs directly — they go through a provider interface.
 
+### Design Decision: Org-Free Interface
+
+The `DataProvider` interface does **not** include organization or permission concepts (`orgId`, roles, etc.). This is intentional:
+
+- **Local mode doesn't need orgs.** The interface should represent pure data operations.
+- **Cloud mode scopes by org internally.** The `SupabaseDataProvider` uses the authenticated user's active org from `AuthContext` to filter queries. The interface callers don't need to know about this.
+- **Separation of concerns.** Auth/permissions are a cross-cutting concern handled at the provider implementation level and UI level (hiding edit buttons for viewers), not at the data interface level.
+
 ### Interface
 
 ```typescript
@@ -544,11 +552,14 @@ interface DataProvider {
   listRegions(): Promise<RegionMeta[]>;
   getRegion(id: string): Promise<Region>;
   saveRegion(region: RegionInput): Promise<Region>;
+  updateRegion(id: string, updates: { name?: string; lengthUnit?: 'ft' | 'm' }): Promise<void>;
   deleteRegion(id: string): Promise<void>;
 
   // Aquifers
   getAquifers(regionId: string): Promise<Aquifer[]>;
   saveAquifers(regionId: string, aquifers: AquiferInput[], mode: 'append' | 'replace'): Promise<void>;
+  renameAquifer(regionId: string, aquiferId: string, newName: string): Promise<void>;
+  deleteAquifer(regionId: string, aquiferId: string): Promise<void>;  // cascades to wells + measurements
 
   // Wells
   getWells(regionId: string): Promise<Well[]>;
@@ -557,15 +568,21 @@ interface DataProvider {
   // Measurements
   getMeasurements(regionId: string, dataType: string): Promise<Measurement[]>;
   saveMeasurements(regionId: string, dataType: string, data: MeasurementInput[], mode: 'append' | 'replace'): Promise<void>;
-  updateMeasurement(id: string, value: number): Promise<void>;
-  deleteMeasurement(id: string): Promise<void>;
+  updateMeasurement(regionId: string, wellId: string, dataType: string, date: string, value: number): Promise<void>;
+  deleteMeasurement(regionId: string, wellId: string, dataType: string, date: string): Promise<void>;
 
   // Spatial analyses (raster interpolations)
   listSpatialAnalyses(regionId: string): Promise<RasterAnalysisMeta[]>;
-  getSpatialAnalysis(id: string): Promise<RasterAnalysisResult>;       // fetches result data from Storage
-  saveSpatialAnalysis(regionId: string, result: RasterAnalysisResult): Promise<void>;  // writes metadata to Postgres + result to Storage
-  deleteSpatialAnalysis(id: string): Promise<void>;                    // deletes metadata + Storage file
-  renameSpatialAnalysis(id: string, newTitle: string): Promise<void>;
+  getSpatialAnalysis(regionId: string, filePath: string): Promise<RasterAnalysisResult>;
+  saveSpatialAnalysis(regionId: string, result: RasterAnalysisResult): Promise<void>;
+  deleteSpatialAnalysis(regionId: string, filePath: string): Promise<void>;
+  renameSpatialAnalysis(regionId: string, oldPath: string, newTitle: string, newCode: string): Promise<void>;
+
+  // Imputation models
+  listModels(regionId: string): Promise<ImputationModelMeta[]>;
+  getModel(regionId: string, filePath: string): Promise<ImputationModelResult>;
+  deleteModel(regionId: string, filePath: string): Promise<void>;
+  renameModel(regionId: string, oldPath: string, newTitle: string, newCode: string): Promise<void>;
 
   // GeoJSON boundaries
   getRegionBoundary(regionId: string): Promise<GeoJSON.FeatureCollection>;
@@ -576,26 +593,29 @@ interface DataProvider {
   saveDataType(regionId: string, dataType: DataType): Promise<void>;
   deleteDataType(regionId: string, code: string): Promise<void>;
 
-  // Version (optimistic locking)
-  getRegionVersion(regionId: string): Promise<number>;
-
-  // Sample regions (cloud only, optional)
-  listSampleRegions?(): Promise<SampleRegionTemplate[]>;
-  importSampleRegion?(templateId: string, targetOrgId: string): Promise<Region>;
+  // Bulk import/export (zip-based)
+  exportRegion(regionId: string): Promise<Blob>;                     // returns zip
+  exportDatabase(): Promise<Blob>;                                    // returns zip of all regions
+  importRegionFromZip(file: File): Promise<{ regionId: string }>;
+  importDatabaseFromZip(file: File, mode: 'append' | 'replace'): Promise<ImportResult>;
 }
 ```
 
 ### Implementations
 
-1. **`SupabaseDataProvider`** — Reads and writes to Supabase Postgres via the Supabase JS client SDK. Used when the user is logged in (cloud mode). Spatial analysis results are stored in a Supabase Storage bucket (`spatial-results/`), with metadata in the `aquifer.spatial_analyses` table.
+Three implementations back this interface, built in order:
 
-2. **`LocalDataProvider`** — Reads and writes to IndexedDB in the browser. Used in air-gapped/local mode. Data is loaded from the user's uploaded zip file and stored in IndexedDB for the duration of the session. Spatial analysis results are stored as IndexedDB blobs.
+1. **`ViteDataProvider`** — Wraps the current Vite dev server middleware (`/api/*` endpoints and `/data/*` file reads). This is the first implementation, built during Phase 1. It preserves all existing behavior while routing through the interface. Used during development.
+
+2. **`IndexedDBDataProvider`** — Reads and writes to browser IndexedDB. Built during Phase 2. Data is loaded from a user-uploaded zip and stored in IndexedDB object stores (one per entity type). Spatial analysis results are stored as IndexedDB blobs. Zero network requests. Used in air-gapped/local mode.
+
+3. **`SupabaseDataProvider`** — Reads and writes to Supabase Postgres via the Supabase JS client SDK. Built later (Phase 4). Scopes all queries by the authenticated user's active organization (from `AuthContext`). Spatial analysis results stored in a Supabase Storage bucket. Used in cloud mode.
 
 ### React Integration
 
 ```typescript
 // Context provides the active data provider
-const DataProviderContext = createContext<DataProvider>(null);
+const DataProviderContext = createContext<DataProvider>(null!);
 
 // Hook used by all components
 function useDataProvider(): DataProvider {
@@ -604,10 +624,14 @@ function useDataProvider(): DataProvider {
 
 // App root selects the provider based on mode
 function App() {
-  const [mode, setMode] = useState<'cloud' | 'local' | null>(null);
-  const provider = mode === 'cloud'
-    ? new SupabaseDataProvider(supabaseClient)
-    : new LocalDataProvider();
+  const [mode, setMode] = useState<'vite' | 'local' | 'cloud'>('vite');
+  const provider = useMemo(() => {
+    switch (mode) {
+      case 'vite':  return new ViteDataProvider();
+      case 'local': return new IndexedDBDataProvider();
+      case 'cloud': return new SupabaseDataProvider(supabaseClient);
+    }
+  }, [mode]);
 
   return (
     <DataProviderContext.Provider value={provider}>
@@ -757,38 +781,186 @@ A GEOGLOWS super-admin (identified by a flag on their user profile or membership
 
 ## 13. Implementation Phases
 
-### Phase 1 — Data Abstraction Layer
+Phases are reordered so that the data abstraction layer and local/air-gapped mode can be built first (Phases 1–2), independently of Supabase, authentication, and deployment work (Phases 3–7). This allows parallel workstreams: one team builds local mode while another team sets up cloud infrastructure.
 
-*No user-visible changes. Purely architectural preparation.*
+### Phase 1 — Data Abstraction Layer + ViteDataProvider
 
-- Define the `DataProvider` interface in TypeScript.
-- Implement `LocalDataProvider` backed by the current Vite middleware (flat files on disk).
-- Create `DataProviderContext` and `useDataProvider()` hook.
-- Refactor all components to use the provider instead of direct `fetch()` / API calls:
-  - `App.tsx` (data loading, refresh, raster load/delete/rename)
-  - `ImportDataHub.tsx` and all sub-wizards
-  - `DataEditor.tsx`
-  - `SpatialAnalysisDialog.tsx` (raster analysis save)
-  - `Sidebar.tsx` (delete operations)
-- All existing functionality must continue to work identically after this phase.
+*No user-visible changes. Purely architectural preparation. The app works exactly as before, but all data I/O goes through the provider interface.*
 
-### Phase 2 — Supabase Setup & Database Schema
+#### 1a. Define the DataProvider interface
 
-*Infrastructure only. No app changes yet. This phase is shared across all three GEOGLOWS apps — do it once.*
+- Create `services/dataProvider.ts` with the `DataProvider` interface (Section 8).
+- Define input types where needed: `RegionInput`, `AquiferInput`, `WellInput`, `MeasurementInput`, `ImportResult`.
+- Keep the interface org-free — no `orgId` parameters. Cloud provider handles org scoping internally later.
+
+#### 1b. Implement ViteDataProvider
+
+Implement `services/viteDataProvider.ts` — wraps all current Vite middleware calls and `/data/*` file reads behind the interface. This is a mechanical translation: each interface method maps to the existing `fetch()` / `freshFetch()` / `saveFiles()` / `deleteFile()` calls that currently live scattered across components.
+
+**Reads (wrapping current fetch/freshFetch calls):**
+
+| Method | Current location | What it wraps |
+|---|---|---|
+| `listRegions()` | `dataLoader.ts:179`, `ImportDataHub.tsx:28` | `GET /api/regions` |
+| `getRegion(id)` | `dataLoader.ts:393` | Load `region.json` + `region.geojson`, compute bounds |
+| `getAquifers(regionId)` | `dataLoader.ts:203` | Load `aquifers.geojson`, group by `aquifer_id` |
+| `getWells(regionId)` | `dataLoader.ts:294` | Parse `wells.csv` |
+| `getMeasurements(regionId, dataType)` | `dataLoader.ts:336` | Parse `data_{code}.csv` |
+| `getRegionBoundary(regionId)` | `dataLoader.ts:393` | Load `region.geojson` |
+| `getAquiferBoundaries(regionId)` | Multiple places | Load raw `aquifers.geojson` |
+| `getDataTypes(regionId)` | Via `listRegions()` | Extract from `region.json` metadata |
+| `listSpatialAnalyses(regionId)` | `dataLoader.ts:426` | `GET /api/list-rasters?region={id}` |
+| `getSpatialAnalysis(regionId, path)` | `App.tsx:469` | Load raster JSON from `/data/{path}` |
+| `listModels(regionId)` | `dataLoader.ts:437` | `GET /api/list-models?region={id}` |
+| `getModel(regionId, path)` | `App.tsx:577` | Load model JSON from `/data/{path}` |
+
+**Writes (wrapping current saveFiles/deleteFile/fetch POST calls):**
+
+| Method | Current location | What it wraps |
+|---|---|---|
+| `saveRegion(input)` | `RegionImporter.tsx:96,182` | Save `region.json` + `region.geojson` via `POST /api/save-data` |
+| `updateRegion(id, updates)` | `App.tsx:810`, `RegionEditor.tsx:98` | Load `region.json`, update fields, save back |
+| `deleteRegion(id)` | `App.tsx:833`, `RegionEditor.tsx:61` | `POST /api/delete-folder` |
+| `saveAquifers(regionId, ...)` | `AquiferImporter.tsx:80,100` | Save `aquifers.geojson` |
+| `renameAquifer(...)` | `App.tsx:880` | Rebuild + save `aquifers.geojson` |
+| `deleteAquifer(...)` | `App.tsx:903`, `AquiferEditor.tsx` | Rebuild `aquifers.geojson`, `wells.csv`, all `data_*.csv` |
+| `saveWells(regionId, ...)` | `WellImporter.tsx:483–520` | Save `wells.csv` |
+| `saveMeasurements(...)` | `MeasurementImporter.tsx:358,401` | Save `data_{code}.csv` |
+| `updateMeasurement(...)` | `DataEditor.tsx` | Edit single row in `data_{code}.csv` |
+| `deleteMeasurement(...)` | `DataEditor.tsx` | Remove single row from `data_{code}.csv` |
+| `saveSpatialAnalysis(...)` | `rasterAnalysis.ts:418` | `POST /api/save-data` with raster JSON |
+| `deleteSpatialAnalysis(...)` | `App.tsx:525` | `POST /api/delete-file` |
+| `renameSpatialAnalysis(...)` | `App.tsx:543` | `POST /api/rename-raster` |
+| `deleteModel(...)` | `App.tsx:601` | `POST /api/delete-file` |
+| `renameModel(...)` | `App.tsx:618` | `POST /api/rename-model` |
+| `saveDataType(...)` | `DataTypeEditor.tsx:83` | Update `region.json` dataTypes array |
+| `deleteDataType(...)` | `DataTypeEditor.tsx:120` | Delete `data_{code}.csv` + update `region.json` |
+| `exportRegion(id)` | `Sidebar.tsx` (download) | Fetch all region files, zip via JSZip |
+| `exportDatabase()` | `ImportDataHub.tsx:125` | Fetch all regions, zip via JSZip |
+| `importRegionFromZip(file)` | `RegionImporter.tsx` (import mode) | Parse zip, save files |
+| `importDatabaseFromZip(...)` | `ImportDataHub.tsx:175` | Parse zip, save/replace regions |
+
+#### 1c. Create React context and hook
+
+- Create `services/DataProviderContext.tsx`:
+  - `DataProviderContext` — React context holding the active provider
+  - `useDataProvider()` — hook that returns the context value
+  - `DataProviderWrapper` — component that creates the `ViteDataProvider` and wraps children
+- Wrap the app root in `DataProviderWrapper`.
+- Initially, mode is always `'vite'`. Mode switching comes in Phase 2.
+
+#### 1d. Refactor components (incremental, one group at a time)
+
+Refactor all components to call `useDataProvider()` instead of direct fetch/API calls. Do this incrementally — one functional area at a time, testing after each:
+
+**Group 1 — Data loading** (highest impact, touches `App.tsx` and `dataLoader.ts`):
+- Replace `loadAllData()` in `App.tsx` with provider calls
+- `loadRegionManifest()` → `provider.listRegions()`
+- Region/aquifer/well/measurement loading → respective `get*()` methods
+- Raster and model listing → `provider.listSpatialAnalyses()`, `provider.listModels()`
+
+**Group 2 — Region management** (`Sidebar.tsx`, `App.tsx`, `RegionEditor.tsx`):
+- Region rename → `provider.updateRegion()`
+- Region delete → `provider.deleteRegion()`
+- Region editor save/delete → same methods
+
+**Group 3 — Aquifer management** (`App.tsx`, `AquiferEditor.tsx`):
+- Aquifer rename → `provider.renameAquifer()`
+- Aquifer delete → `provider.deleteAquifer()`
+- Aquifer editor save/delete → same methods
+
+**Group 4 — Import wizards** (`ImportDataHub.tsx`, `RegionImporter.tsx`, `AquiferImporter.tsx`, `WellImporter.tsx`, `MeasurementImporter.tsx`, `DataTypeEditor.tsx`):
+- Region import → `provider.saveRegion()` / `provider.importRegionFromZip()`
+- Aquifer import → `provider.saveAquifers()`
+- Well import → `provider.saveWells()`
+- Measurement import → `provider.saveMeasurements()`
+- Data type add/delete → `provider.saveDataType()` / `provider.deleteDataType()`
+- Database export/import → `provider.exportDatabase()` / `provider.importDatabaseFromZip()`
+
+**Group 5 — Spatial analyses and models** (`App.tsx`, `rasterAnalysis.ts`):
+- Raster load/save/delete/rename → `provider.get/save/delete/renameSpatialAnalysis()`
+- Model load/delete/rename → `provider.get/delete/renameModel()`
+
+**Group 6 — Data editor** (`DataEditor.tsx`):
+- Measurement edit/delete → `provider.updateMeasurement()` / `provider.deleteMeasurement()`
+
+#### 1e. Clean up dead code
+
+- Remove direct `fetch()`, `freshFetch()`, `saveFiles()`, `deleteFile()` calls from components (they should only exist inside `ViteDataProvider` now).
+- `services/importUtils.ts` — keep CSV parsing, date detection, column mapping, and spatial utilities. Move `saveFiles()`, `deleteFile()`, `freshFetch()` to `ViteDataProvider` internals (or keep them as private helpers imported only by `ViteDataProvider`).
+- `services/dataLoader.ts` — most of `loadAllData()` logic moves into `ViteDataProvider`. The file may be eliminated or reduced to helper functions.
+
+#### Validation
+
+- All existing functionality must work identically after this phase.
+- Run `npx tsc --noEmit` — no type errors.
+- Manual test: import region, add aquifers/wells/measurements, create spatial analysis, edit data, delete data, export database.
+- Grep the codebase: no component should contain direct `fetch('/api/` or `fetch('/data/` calls except inside `ViteDataProvider`.
+
+---
+
+### Phase 2 — IndexedDB Data Provider + Local Mode
+
+*First user-visible change: a "Use Locally" option that runs the full app with zero network requests.*
+
+#### 2a. IndexedDB data provider
+
+- Implement `services/indexedDBDataProvider.ts` conforming to the same `DataProvider` interface.
+- Create IndexedDB database `aquiferx` with object stores:
+  - `regions` — keyed by `id`, stores `RegionMeta` + boundary GeoJSON
+  - `aquifers` — keyed by `[regionId, aquiferId]`, stores boundary GeoJSON per aquifer
+  - `wells` — keyed by `[regionId, wellId]`, stores well data
+  - `measurements` — keyed by `[regionId, wellId, dataType, date]`, stores values
+  - `spatialAnalyses` — keyed by path, stores full raster JSON (as blobs for large results)
+  - `models` — keyed by path, stores full model JSON
+- All operations are async (IndexedDB is async by nature), matching the `Promise`-based interface.
+- Use the `idb` library (lightweight IndexedDB wrapper with proper TypeScript types) or raw IndexedDB API.
+
+#### 2b. Zip upload flow
+
+- Build a **mode selector** UI (landing page or modal) with "Use Locally" entry point.
+- User selects a zip file → parse in-browser via JSZip (already a dependency).
+- Discover regions in the zip (find `region.json` files), same logic as current `importDatabaseFromZip`.
+- Populate IndexedDB object stores from the parsed zip data.
+- Switch the `DataProviderContext` to `IndexedDBDataProvider`.
+- App loads and renders from IndexedDB — full visualization, analysis, import features work.
+
+#### 2c. Zip export flow
+
+- `exportDatabase()` on the IndexedDB provider reads all object stores and builds a zip in the same format as the current file layout.
+- User downloads the zip — can re-upload it later or share with others.
+
+#### 2d. Session management
+
+- `beforeunload` listener warns user if IndexedDB has data and they haven't exported.
+- "Clear Data" action in the UI that wipes IndexedDB stores and returns to mode selection.
+- Optionally persist data across sessions (IndexedDB survives tab close by default) — let user choose "Keep data in browser" vs. "Clear on close".
+
+#### 2e. Validation
+
+- Verify zero network requests in local mode (browser DevTools network tab).
+- Full test: upload zip → browse regions → view map → view charts → run spatial analysis → export zip → re-import → verify data integrity.
+- Test with the existing sample datasets (Jamaica, Utah, etc.) exported as zip.
+
+---
+
+### Phase 3 — Supabase Setup & Database Schema
+
+*Infrastructure only. No app changes. Shared across all three GEOGLOWS apps. Can be done in parallel with Phases 1–2 by the cloud infrastructure team.*
 
 - Create a single Supabase project for all GEOGLOWS apps.
 - Apply shared schema: `profiles`, `organizations`, `org_memberships` tables in `public`.
-- Create `aquifer` schema and apply all Aquifer Analyst tables (Section 5).
+- Create `aquifer` schema and apply all Aquifer Analyst tables (Section 6).
 - Create placeholder `hydroviewer` and `grace` schemas (other teams populate later).
-- Write and test RLS policies (Section 6) for both shared and `aquifer` tables.
+- Write and test RLS policies (Section 7) for both shared and `aquifer` tables.
 - Set up Supabase Storage bucket for GeoJSON and zip files.
 - Configure auth providers (email/password, Google; optionally ORCID for academic users).
 - Configure Supabase Auth redirect URLs for all three app domains.
-- Package the 9 existing regions as sample region templates and upload to Supabase Storage.
+- Package the existing regions as sample region templates and upload to Supabase Storage.
 
-### Phase 3 — Authentication & User Management
+### Phase 4 — Authentication & User Management
 
-*First user-visible change. Build as the shared `@geoglows/auth` package (Section 1) so all three apps can use it.*
+*First cloud-visible change. Build as the shared `@geoglows/auth` package (Section 1) so all three apps can use it.*
 
 - Create the `@geoglows/auth` package with shared auth components.
 - Implement `SupabaseProvider` and `AuthProvider` React contexts.
@@ -802,42 +974,29 @@ A GEOGLOWS super-admin (identified by a flag on their user profile or membership
 - Gate the Import Data hub behind admin role check.
 - Provide integration guide for Hydroviewer and GRACE teams to add auth to their apps.
 
-### Phase 4 — Cloud Data Provider
+### Phase 5 — Cloud Data Provider (SupabaseDataProvider)
 
-*The big migration — cloud read/write.*
+*The big migration — cloud read/write. Plugs into the same DataProvider interface built in Phase 1.*
 
 - Implement `SupabaseDataProvider` with all CRUD operations against Postgres.
-- Wire up the import system (ImportDataHub, all sub-wizards) to use the provider.
-- Implement optimistic locking on all save operations.
-- Adapt DataEditor for cloud save (individual measurement edit/delete).
-- Adapt SpatialAnalysisDialog for cloud save (metadata → Postgres, result JSON → Supabase Storage bucket).
-- Wire up spatial analysis list/load/delete/rename through the provider.
+- Org scoping: provider reads active org from `AuthContext` and filters all queries by `org_id`.
+- Implement optimistic locking on all save operations (region `version` column).
+- Spatial analysis results stored in Supabase Storage bucket; metadata in `aquifer.spatial_analyses`.
 - Handle large measurement datasets (pagination or streaming for regions with 100K+ rows).
 - Test the full import → visualize → analyze flow end-to-end.
 
-### Phase 5 — Vercel Deployment
+### Phase 6 — Vercel Deployment
 
 *Go live. Each app is a separate Vercel project.*
 
 - Create Vercel project for Aquifer Analyst linked to its GitHub repo.
-- Implement serverless API routes in `api/` (Section 10) for any operations that require server-side logic.
-- Configure environment variables in Vercel dashboard (shared Supabase URL, anon key, service role key — same values across all three apps).
+- Implement serverless API routes in `api/` (Section 11) for any operations that require server-side logic.
+- Configure environment variables in Vercel dashboard (shared Supabase URL, anon key, service role key).
 - Set up preview deployments for pull requests.
 - DNS configuration: `aquifer.apps.geoglows.org` (or similar subdomain scheme).
 - Remove the Vite dev server middleware plugin (no longer needed in production).
 - Verify the full flow in the deployed environment.
-- Coordinate with Hydroviewer and GRACE teams on their Vercel deployments (same Supabase env vars, their own subdomains).
-
-### Phase 6 — Local / Air-Gapped Mode
-
-*Complete the second data path.*
-
-- Implement `IndexedDBDataProvider` (reads/writes to browser IndexedDB).
-- Build the **zip upload flow**: user selects a zip → parsed in-browser → stored in IndexedDB.
-- Build the **zip export flow**: serialize IndexedDB contents back to the standard zip format.
-- Ensure all visualization and analysis features work in local mode (MapView, charts, storage analysis, cross-sections).
-- Ensure **zero network requests** in local mode (verify with browser network tab).
-- Session management: warn user before closing the tab if they have unsaved data. Provide a "Clear Data" action.
+- Coordinate with Hydroviewer and GRACE teams on their Vercel deployments.
 
 ### Phase 7 — Public Access, Sharing & Sample Regions
 
