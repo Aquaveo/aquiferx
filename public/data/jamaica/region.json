@@ -32,7 +32,7 @@
     {
       "code": "hardness",
       "name": "Hardness",
-      "unit": "mg/L"
+      "unit": "mgCaCO3/L"
     },
     {
       "code": "chloride",
@@ -92,12 +92,12 @@
     {
       "code": "fc",
       "name": "FC",
-      "unit": "CFU/100mL"
+      "unit": "MPN/100ml"
     },
     {
       "code": "tc",
       "name": "TC",
-      "unit": "mg/L"
+      "unit": "MPN/100ml"
     }
   ]
 }
