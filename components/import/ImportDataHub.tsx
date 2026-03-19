@@ -313,14 +313,14 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
               title="Export all regions as a zip file"
             >
               {dbAction === 'exporting' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              Export
+              Export Database
             </button>
             <label
               className={`flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 rounded-md text-xs font-medium hover:bg-amber-100 transition-colors cursor-pointer ${dbAction !== 'idle' ? 'opacity-40 pointer-events-none' : ''}`}
               title="Import regions from a zip file"
             >
               <Upload size={14} />
-              Import
+              Import Database
               <input
                 ref={importFileRef}
                 type="file"
