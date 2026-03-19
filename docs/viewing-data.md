@@ -16,7 +16,7 @@ The sidebar on the left shows a hierarchical tree of your data:
 
 Right-click on a region or aquifer to access additional actions:
 
-- **Edit** — Modify region name, length unit, or single-unit setting.
+- **Edit** — Modify region name or length unit.
 - **Rename** — Rename a region or aquifer.
 - **Download** — Export the region as a ZIP file.
 - **Delete** — Remove the item (with confirmation).

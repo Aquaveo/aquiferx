@@ -793,111 +793,18 @@ const App: React.FC = () => {
 
   // --- Region/Aquifer rename & delete handlers ---
 
-  const handleEditRegion = async (regionId: string, newName: string, lengthUnit: 'ft' | 'm', singleUnit?: boolean) => {
+  const handleEditRegion = async (regionId: string, newName: string, lengthUnit: 'ft' | 'm') => {
     const region = regions.find(r => r.id === regionId);
     if (!region) return;
-    const newSingleUnit = singleUnit !== undefined ? singleUnit : region.singleUnit;
-    const singleUnitChanged = newSingleUnit !== region.singleUnit;
 
-    setRegions(prev => prev.map(r => r.id === regionId ? { ...r, name: newName, lengthUnit, singleUnit: newSingleUnit } : r));
-
-    // Handle single-unit mode change
-    if (singleUnitChanged) {
-      if (newSingleUnit) {
-        // Switching TO single-unit: rewrite aquifers.geojson with single boundary, update wells/measurements aquifer_id to "0"
-        try {
-          // Create single-unit aquifer from region boundary
-          const gjRes = await fetch(`/data/${regionId}/region.geojson`);
-          if (gjRes.ok) {
-            const regionGj = await gjRes.json();
-            const singleAquifer = {
-              type: 'FeatureCollection',
-              features: [{
-                type: 'Feature',
-                properties: { aquifer_id: '0', aquifer_name: newName },
-                geometry: regionGj.type === 'FeatureCollection' ? regionGj.features[0]?.geometry : regionGj.geometry
-              }]
-            };
-            const filesToSave: { path: string; content: string }[] = [
-              { path: `${regionId}/aquifers.geojson`, content: JSON.stringify(singleAquifer, null, 2) }
-            ];
-
-            // Update wells.csv — set all aquifer_id to "0"
-            try {
-              const wRes = await fetch(`/data/${regionId}/wells.csv`);
-              if (wRes.ok) {
-                const text = await wRes.text();
-                const lines = text.split('\n');
-                if (lines.length > 1) {
-                  const headers = lines[0];
-                  const cols = headers.split(',');
-                  const aqIdx = cols.findIndex(c => c.trim() === 'aquifer_id');
-                  if (aqIdx >= 0) {
-                    const newLines = [headers, ...lines.slice(1).filter(l => l.trim()).map(line => {
-                      const parts = line.split(',');
-                      parts[aqIdx] = '0';
-                      return parts.join(',');
-                    })];
-                    filesToSave.push({ path: `${regionId}/wells.csv`, content: newLines.join('\n') });
-                  }
-                }
-              }
-            } catch {}
-
-            // Update all data_*.csv — set all aquifer_id to "0"
-            for (const dt of region.dataTypes) {
-              try {
-                const mRes = await fetch(`/data/${regionId}/data_${dt.code}.csv`);
-                if (mRes.ok) {
-                  const text = await mRes.text();
-                  const lines = text.split('\n');
-                  if (lines.length > 1) {
-                    const headers = lines[0];
-                    const cols = headers.split(',');
-                    const aqIdx = cols.findIndex(c => c.trim() === 'aquifer_id');
-                    if (aqIdx >= 0) {
-                      const newLines = [headers, ...lines.slice(1).filter(l => l.trim()).map(line => {
-                        const parts = line.split(',');
-                        parts[aqIdx] = '0';
-                        return parts.join(',');
-                      })];
-                      filesToSave.push({ path: `${regionId}/data_${dt.code}.csv`, content: newLines.join('\n') });
-                    }
-                  }
-                }
-              } catch {}
-            }
-
-            await fetch('/api/save-data', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ files: filesToSave }),
-            });
-          }
-        } catch (err) {
-          console.error('Failed to switch to single-unit mode:', err);
-        }
-      } else {
-        // Switching FROM single-unit: delete the auto-generated aquifer, clear aquifer assignments
-        try {
-          await fetch('/api/delete-file', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filePath: `${regionId}/aquifers.geojson` }),
-          });
-        } catch {}
-      }
-
-      // Reload data to reflect changes
-      handleDataChanged();
-    }
+    setRegions(prev => prev.map(r => r.id === regionId ? { ...r, name: newName, lengthUnit } : r));
 
     // Persist updated region.json (per-folder)
     const regionMeta = {
       id: regionId,
       name: newName,
       lengthUnit,
-      singleUnit: newSingleUnit,
+      singleUnit: region.singleUnit,
       dataTypes: region.dataTypes
     };
     await fetch('/api/save-data', {

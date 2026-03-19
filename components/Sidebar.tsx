@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Region, Aquifer, RasterAnalysisMeta, ImputationModelMeta } from '../types';
-import { MapPin, Droplets, MoreVertical, Pencil, Trash2, Download, AlertTriangle, Layers, Loader2, Info, Check, X as XIcon, ChevronRight, ChevronDown, Activity, Eye, EyeOff } from 'lucide-react';
+import { MapPin, Droplets, MoreVertical, Pencil, Trash2, Download, Layers, Loader2, Info, Check, X as XIcon, ChevronRight, ChevronDown, Activity, Eye, EyeOff } from 'lucide-react';
 
 interface SidebarProps {
   regions: Region[];
@@ -12,7 +12,7 @@ interface SidebarProps {
   setSelectedAquifer: (a: Aquifer | null) => void;
   visibleRegionIds: Set<string>;
   onToggleRegionVisibility: (id: string) => void;
-  onEditRegion: (id: string, newName: string, lengthUnit: 'ft' | 'm', singleUnit?: boolean) => void;
+  onEditRegion: (id: string, newName: string, lengthUnit: 'ft' | 'm') => void;
   onDownloadRegion: (id: string) => void;
   onDeleteRegion: (id: string) => void;
   onRenameAquifer: (id: string, newName: string) => void;
@@ -83,8 +83,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [editing, setEditing] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [editUnit, setEditUnit] = useState<'ft' | 'm'>('ft');
-  const [editSingleUnit, setEditSingleUnit] = useState(false);
-  const [showSingleUnitConfirm, setShowSingleUnitConfirm] = useState<'to-single' | 'to-multi' | null>(null);
+
+
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [expandedRegionIds, setExpandedRegionIds] = useState<Set<string>>(new Set());
   const [expandedAquiferIds, setExpandedAquiferIds] = useState<Set<string>>(new Set());
@@ -219,8 +219,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     setEditing(`region-${id}`);
     setEditValue(region.name);
     setEditUnit(region.lengthUnit);
-    setEditSingleUnit(region.singleUnit);
-    setShowSingleUnitConfirm(null);
   };
 
   const startEditAquifer = (id: string, currentName: string) => {
@@ -233,23 +231,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     const trimmed = editValue.trim();
     if (trimmed) {
       const region = regions.find(r => r.id === id);
-      if (trimmed !== region?.name || editUnit !== region?.lengthUnit || editSingleUnit !== region?.singleUnit) {
-        onEditRegion(id, trimmed, editUnit, editSingleUnit);
+      if (trimmed !== region?.name || editUnit !== region?.lengthUnit) {
+        onEditRegion(id, trimmed, editUnit);
       }
     }
     setEditing(null);
-  };
-
-  const handleSingleUnitToggle = () => {
-    const regionId = editing?.replace('region-', '');
-    const region = regions.find(r => r.id === regionId);
-    if (!region) return;
-
-    if (!editSingleUnit) {
-      setShowSingleUnitConfirm('to-single');
-    } else {
-      setShowSingleUnitConfirm('to-multi');
-    }
   };
 
   const confirmEditAquifer = (id: string) => {
@@ -1120,81 +1106,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Aquifer Mode</label>
-                  <div className="flex space-x-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (editSingleUnit) handleSingleUnitToggle();
-                      }}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                        !editSingleUnit
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      Multi-aquifer
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!editSingleUnit) handleSingleUnitToggle();
-                      }}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                        editSingleUnit
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      Single-unit
-                    </button>
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {editSingleUnit
-                      ? 'No aquifer boundaries. All data under a single unit.'
-                      : 'Wells and measurements are grouped by aquifer.'}
-                  </p>
-                </div>
               </div>
-
-              {/* Single-unit mode change confirmation */}
-              {showSingleUnitConfirm && (
-                <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-amber-800">
-                        {showSingleUnitConfirm === 'to-single'
-                          ? 'Switch to single-unit mode?'
-                          : 'Switch to multi-aquifer mode?'}
-                      </p>
-                      <p className="text-xs text-amber-700 mt-1">
-                        {showSingleUnitConfirm === 'to-single'
-                          ? 'All aquifer assignments in wells and measurements will be set to a single default aquifer. The existing aquifer boundaries will be replaced with a single-unit aquifer.'
-                          : 'The single-unit aquifer will be cleared. You will need to upload new aquifer boundaries and re-assign wells.'}
-                      </p>
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          onClick={() => {
-                            setEditSingleUnit(showSingleUnitConfirm === 'to-single');
-                            setShowSingleUnitConfirm(null);
-                          }}
-                          className="px-3 py-1 bg-amber-600 text-white rounded text-xs font-medium hover:bg-amber-700"
-                        >
-                          Confirm
-                        </button>
-                        <button
-                          onClick={() => setShowSingleUnitConfirm(null)}
-                          className="px-3 py-1 bg-white text-slate-600 rounded text-xs font-medium border border-slate-200 hover:bg-slate-50"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               <div className="flex justify-end space-x-3 mt-6">
                 <button
