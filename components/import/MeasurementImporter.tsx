@@ -39,6 +39,23 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   const [isMultiType, setIsMultiType] = useState(false);
   const [typeColumnMapping, setTypeColumnMapping] = useState<Record<string, string>>({});
 
+  // Auto-match CSV columns to data types when multi-type mode is active
+  useEffect(() => {
+    if (!isMultiType || !file) return;
+    const cols = file.columns;
+    const mapping: Record<string, string> = {};
+    for (const dt of dataTypes) {
+      // Try exact match on code, then case-insensitive match on code or name
+      const match = cols.find(c => c === dt.code)
+        || cols.find(c => c.toLowerCase() === dt.code.toLowerCase())
+        || cols.find(c => c.toLowerCase() === dt.name.toLowerCase())
+        // Partial: column contains code or code contains column
+        || cols.find(c => c.toLowerCase().includes(dt.code.toLowerCase()) && c.toLowerCase() !== 'well_id' && c.toLowerCase() !== 'date' && c.toLowerCase() !== 'aquifer_id');
+      if (match) mapping[dt.code] = match;
+    }
+    setTypeColumnMapping(prev => ({ ...prev, ...mapping }));
+  }, [isMultiType, file, dataTypes]);
+
   // WTE depth-below-GSE option
   const [wteIsDepth, setWteIsDepth] = useState(false);
   const [wellGseMap, setWellGseMap] = useState<Record<string, number>>({});
