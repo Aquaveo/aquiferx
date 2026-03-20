@@ -1,6 +1,6 @@
 import {
   Aquifer, Region, Well, Measurement,
-  RasterAnalysisParams, RasterAnalysisResult, RasterGrid, RasterFrame,
+  RasterAnalysisParams, RasterAnalysisResult, RasterGrid, RasterFrame, RasterFrameStats,
   SpatialMethod, KrigingOptions, IdwOptions, GeneralInterpolationOptions, TemporalOptions, RasterOptions,
   ImputationModelResult,
 } from '../types';
@@ -372,10 +372,50 @@ export async function runRasterAnalysis(
     frames.push({ date: intervalDates[ti], values: gridValues });
   }
 
+  // Step 6: Compute per-frame statistics from well-level values
+  onProgress('Computing statistics...', 82);
+  await yieldToUI();
+
+  const stats: RasterFrameStats[] = [];
+  for (let ti = 0; ti < intervalDates.length; ti++) {
+    const vals: number[] = [];
+    for (const [, { values }] of wellInterp) {
+      const v = values[ti];
+      if (v !== null) vals.push(v);
+    }
+    if (vals.length === 0) {
+      stats.push({ date: intervalDates[ti], count: 0, min: 0, max: 0, mean: 0, std: 0, median: 0, p25: 0, p75: 0 });
+      continue;
+    }
+    vals.sort((a, b) => a - b);
+    const n = vals.length;
+    const sum = vals.reduce((s, v) => s + v, 0);
+    const mean = sum / n;
+    const variance = vals.reduce((s, v) => s + (v - mean) ** 2, 0) / n;
+    const std = Math.sqrt(variance);
+    const percentile = (p: number) => {
+      const idx = (p / 100) * (n - 1);
+      const lo = Math.floor(idx);
+      const hi = Math.ceil(idx);
+      return lo === hi ? vals[lo] : vals[lo] + (vals[hi] - vals[lo]) * (idx - lo);
+    };
+    stats.push({
+      date: intervalDates[ti],
+      count: n,
+      min: Math.round(vals[0] * 100) / 100,
+      max: Math.round(vals[n - 1] * 100) / 100,
+      mean: Math.round(mean * 100) / 100,
+      std: Math.round(std * 100) / 100,
+      median: Math.round(percentile(50) * 100) / 100,
+      p25: Math.round(percentile(25) * 100) / 100,
+      p75: Math.round(percentile(75) * 100) / 100,
+    });
+  }
+
   onProgress('Saving results...', 85);
   await yieldToUI();
 
-  // Step 6: Assemble result
+  // Step 7: Assemble result
   const code = slugify(title);
 
   // Build legacy params for backward compatibility
@@ -411,6 +451,7 @@ export async function runRasterAnalysis(
     createdAt: new Date().toISOString(),
     options,
     generatedAt: new Date().toISOString(),
+    stats,
   };
 
   // Save to disk via API — per-aquifer subfolder with raster_ prefix

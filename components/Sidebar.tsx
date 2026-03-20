@@ -43,6 +43,7 @@ interface TreeItem {
   regionId: string;
   aquiferId?: string;
   rasterCode?: string;
+  rasterDataType?: string;
   modelCode?: string;
 }
 
@@ -141,7 +142,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           if (expandedAquiferIds.has(a.id)) {
             const rasters = rastersByAquifer.get(`${r.id}:${a.id}`) || [];
             for (const m of rasters) {
-              items.push({ key: `raster-${m.regionId}-${m.code}`, type: 'raster', regionId: r.id, aquiferId: a.id, rasterCode: m.code });
+              items.push({ key: `raster-${m.regionId}-${m.dataType}_${m.code}`, type: 'raster', regionId: r.id, aquiferId: a.id, rasterCode: m.code, rasterDataType: m.dataType });
             }
             const models = modelsByAquifer.get(`${r.id}:${a.id}`) || [];
             for (const m of models) {
@@ -202,11 +203,11 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Track last-active raster per aquifer
   useEffect(() => {
     if (activeRasterCode) {
-      const meta = rasterMeta.find(m => m.code === activeRasterCode);
+      const meta = rasterMeta.find(m => `${m.dataType}_${m.code}` === activeRasterCode);
       if (meta) {
         setLastActiveRasterByAquifer(prev => {
           const next = new Map(prev);
-          next.set(meta.aquiferId, meta.code);
+          next.set(meta.aquiferId, `${meta.dataType}_${meta.code}`);
           return next;
         });
       }
@@ -295,9 +296,9 @@ const Sidebar: React.FC<SidebarProps> = ({
       setExpandedAquiferIds(hasChildren ? new Set([a.id]) : new Set());
       // Restore last-active raster if none active
       if (!activeRasterCode && rasters.length > 0) {
-        const lastCode = lastActiveRasterByAquifer.get(a.id);
-        if (lastCode) {
-          const meta = rasters.find(m => m.code === lastCode);
+        const lastKey = lastActiveRasterByAquifer.get(a.id);
+        if (lastKey) {
+          const meta = rasters.find(m => `${m.dataType}_${m.code}` === lastKey);
           if (meta) onLoadRaster(meta);
         }
       }
@@ -390,9 +391,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         const a = allAquifers.find(aa => aa.id === item.aquiferId);
         if (a) handleAquiferClick(a);
       } else if (item.type === 'raster') {
-        const m = rasterMeta.find(mm => mm.code === item.rasterCode && mm.regionId === item.regionId);
+        const m = rasterMeta.find(mm => mm.code === item.rasterCode && mm.dataType === item.rasterDataType && mm.regionId === item.regionId);
         if (m) {
-          if (activeRasterCode === m.code) {
+          if (activeRasterCode === `${m.dataType}_${m.code}`) {
             onUnloadRaster();
           } else {
             onLoadRaster(m);
@@ -414,20 +415,21 @@ const Sidebar: React.FC<SidebarProps> = ({
   // --- Render helpers ---
 
   const renderRasterRow = (m: RasterAnalysisMeta) => {
-    const isActive = activeRasterCode === m.code;
-    const isCompare = compareRasterCodes.includes(m.code);
+    const rasterKey = `${m.dataType}_${m.code}`;
+    const isActive = activeRasterCode === rasterKey;
+    const isCompare = compareRasterCodes.includes(rasterKey);
     const isLoading = loadingRasterCode === m.code;
-    const rasterMenuKey = `raster-${m.regionId}-${m.code}`;
+    const rasterMenuKey = `raster-${m.regionId}-${rasterKey}`;
     const isRasterMenuOpen = menuOpen === rasterMenuKey;
     const isRasterConfirming = confirmDelete === rasterMenuKey;
-    const isRasterEditing = editing === `raster-${m.regionId}-${m.code}`;
-    const itemKey = `raster-${m.regionId}-${m.code}`;
+    const isRasterEditing = editing === `raster-${m.regionId}-${rasterKey}`;
+    const itemKey = `raster-${m.regionId}-${rasterKey}`;
     const isFocused = focusedItemKey === itemKey;
     const displayTitle = `${m.dataType}_${m.title}`;
 
     if (isRasterConfirming) {
       return (
-        <div key={m.code} className="pl-16 pr-2 py-1" data-item-key={itemKey}>
+        <div key={rasterKey} className="pl-16 pr-2 py-1" data-item-key={itemKey}>
           <div className="px-2 py-1.5 rounded bg-red-50 border border-red-200 text-xs">
             <p className="text-red-700 font-medium mb-1.5">Delete "{displayTitle}"?</p>
             <div className="flex space-x-2">
@@ -451,7 +453,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     if (isRasterEditing) {
       return (
-        <div key={m.code} className="pl-16 pr-2 flex items-center gap-1 py-1" data-item-key={itemKey}>
+        <div key={rasterKey} className="pl-16 pr-2 flex items-center gap-1 py-1" data-item-key={itemKey}>
           <input
             autoFocus
             value={editValue}
@@ -492,7 +494,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     return (
       <div
-        key={m.code}
+        key={rasterKey}
         className="relative group/raster"
         data-item-key={itemKey}
       >

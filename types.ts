@@ -137,6 +137,18 @@ export interface RasterOptions {
   general: GeneralInterpolationOptions;
 }
 
+export interface RasterFrameStats {
+  date: string;
+  count: number;
+  min: number;
+  max: number;
+  mean: number;
+  std: number;
+  median: number;
+  p25: number;
+  p75: number;
+}
+
 export interface RasterAnalysisResult {
   version: number;
   title: string;
@@ -151,6 +163,7 @@ export interface RasterAnalysisResult {
   createdAt: string;
   options?: RasterOptions;
   generatedAt?: string;
+  stats?: RasterFrameStats[];
 }
 
 export interface CrossSectionProfile {

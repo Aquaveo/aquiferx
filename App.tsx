@@ -19,6 +19,7 @@ import ModelInfoDialog from './components/ModelInfoDialog';
 import RasterOverlay from './components/RasterOverlay';
 import CrossSectionChart from './components/CrossSectionChart';
 import { computeStorageChange } from './utils/storageVolume';
+import RasterStatsChart from './components/RasterStatsChart';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from 'recharts';
@@ -230,7 +231,7 @@ const App: React.FC = () => {
   const [gldasDateRange, setGldasDateRange] = useState<{ min: string; max: string } | null>(null);
   const [showCombinedModel, setShowCombinedModel] = useState(false);
   const [crossSectionProfile, setCrossSectionProfile] = useState<CrossSectionProfile | null>(null);
-  const [activeTimeSeriesTab, setActiveTimeSeriesTab] = useState<'waterLevel' | 'storageChange' | 'crossSection'>('waterLevel');
+  const [activeTimeSeriesTab, setActiveTimeSeriesTab] = useState<'waterLevel' | 'storageChange' | 'rasterStats' | 'crossSection'>('waterLevel');
   const [rasterFrameDate, setRasterFrameDate] = useState<{ date: string; dateTs: number } | null>(null);
   const [showActiveWells, setShowActiveWells] = useState(false);
   const [storageCoeff, setStorageCoeff] = useState(0.1);
@@ -316,6 +317,8 @@ const App: React.FC = () => {
     if (rasterResult) {
       if (rasterResult.dataType === 'wte') {
         setActiveTimeSeriesTab('storageChange');
+      } else if (rasterResult.stats) {
+        setActiveTimeSeriesTab('rasterStats');
       }
     } else {
       setActiveTimeSeriesTab('waterLevel');
@@ -330,7 +333,7 @@ const App: React.FC = () => {
     if (crossSectionProfile) {
       setActiveTimeSeriesTab('crossSection');
     } else if (activeTimeSeriesTab === 'crossSection') {
-      setActiveTimeSeriesTab(rasterResult?.dataType === 'wte' ? 'storageChange' : 'waterLevel');
+      setActiveTimeSeriesTab(rasterResult?.dataType === 'wte' ? 'storageChange' : rasterResult?.stats ? 'rasterStats' : 'waterLevel');
     }
   }, [crossSectionProfile]);
 
@@ -496,8 +499,8 @@ const App: React.FC = () => {
   };
 
   const handleToggleCompareRaster = async (meta: RasterAnalysisMeta) => {
-    if (rasterResult && rasterResult.code === meta.code && rasterResult.regionId === meta.regionId) return;
-    const existingIdx = compareRasterResults.findIndex(r => r.code === meta.code && r.regionId === meta.regionId);
+    if (rasterResult && rasterResult.code === meta.code && rasterResult.dataType === meta.dataType && rasterResult.regionId === meta.regionId) return;
+    const existingIdx = compareRasterResults.findIndex(r => r.code === meta.code && r.dataType === meta.dataType && r.regionId === meta.regionId);
     if (existingIdx >= 0) {
       setCompareRasterResults(prev => prev.filter((_, i) => i !== existingIdx));
       return;
@@ -515,11 +518,11 @@ const App: React.FC = () => {
 
   const handleDeleteRaster = async (meta: RasterAnalysisMeta) => {
     // Unload if this is the active raster
-    if (rasterResult?.code === meta.code) {
+    if (rasterResult?.code === meta.code && rasterResult?.dataType === meta.dataType) {
       setRasterResult(null);
     }
     // Remove from metadata list
-    setRasterMeta(prev => prev.filter(m => !(m.code === meta.code && m.regionId === meta.regionId)));
+    setRasterMeta(prev => prev.filter(m => !(m.code === meta.code && m.dataType === meta.dataType && m.regionId === meta.regionId)));
     // Delete the file on disk
     try {
       await fetch('/api/delete-file', {
@@ -547,12 +550,12 @@ const App: React.FC = () => {
       });
       if (res.ok) {
         setRasterMeta(prev => prev.map(m =>
-          m.code === meta.code && m.regionId === meta.regionId
+          m.code === meta.code && m.dataType === meta.dataType && m.regionId === meta.regionId
             ? { ...m, title: newTitle, code: newCode, filePath: newPath }
             : m
         ));
         // Update active raster if it was the renamed one
-        if (rasterResult?.code === meta.code && rasterResult?.regionId === meta.regionId) {
+        if (rasterResult?.code === meta.code && rasterResult?.dataType === meta.dataType && rasterResult?.regionId === meta.regionId) {
           setRasterResult(prev => prev ? { ...prev, title: newTitle, code: newCode } : null);
         }
       }
@@ -1126,8 +1129,8 @@ const App: React.FC = () => {
         onRenameAquifer={handleRenameAquifer}
         onDeleteAquifer={handleDeleteAquifer}
         rasterMeta={rasterMeta}
-        activeRasterCode={rasterResult?.code || null}
-        compareRasterCodes={compareRasterResults.map(r => r.code)}
+        activeRasterCode={rasterResult ? `${rasterResult.dataType}_${rasterResult.code}` : null}
+        compareRasterCodes={compareRasterResults.map(r => `${r.dataType}_${r.code}`)}
         loadingRasterCode={loadingRasterCode}
         onLoadRaster={handleLoadRaster}
         onUnloadRaster={handleUnloadRaster}
@@ -1416,50 +1419,70 @@ const App: React.FC = () => {
           >
             {(selectedWells.length > 0 || rasterResult || crossSectionProfile) && (() => {
               // Build available tabs dynamically
-              const availableTabs: ('waterLevel' | 'storageChange' | 'crossSection')[] = [];
+              const availableTabs: ('waterLevel' | 'storageChange' | 'rasterStats' | 'crossSection')[] = [];
               if (selectedWells.length > 0) availableTabs.push('waterLevel');
               if (rasterResult?.dataType === 'wte') availableTabs.push('storageChange');
+              if (rasterResult?.stats) availableTabs.push('rasterStats');
               if (crossSectionProfile) availableTabs.push('crossSection');
               const showTabs = availableTabs.length > 1;
               const effectiveTab = availableTabs.includes(activeTimeSeriesTab) ? activeTimeSeriesTab : availableTabs[0];
               return (
-                <div className="p-4 h-full flex flex-col">
+                <div className="h-full flex flex-col">
+                  {showTabs && (
+                    <div className="flex px-4 pt-1 -mb-px" style={{ zIndex: 1 }}>
+                      {availableTabs.includes('waterLevel') && (
+                        <button
+                          onClick={() => setActiveTimeSeriesTab('waterLevel')}
+                          className={`px-3 py-1 text-[11px] font-medium rounded-t border border-b-0 transition-colors ${
+                            effectiveTab === 'waterLevel'
+                              ? 'bg-white text-slate-800 border-slate-200'
+                              : 'bg-slate-50 text-slate-400 border-transparent hover:text-slate-600'
+                          }`}
+                        >
+                          {activeDataType.code === 'wte' ? 'Water Level' : activeDataType.name}
+                        </button>
+                      )}
+                      {availableTabs.includes('storageChange') && (
+                        <button
+                          onClick={() => setActiveTimeSeriesTab('storageChange')}
+                          className={`px-3 py-1 text-[11px] font-medium rounded-t border border-b-0 transition-colors ${
+                            effectiveTab === 'storageChange'
+                              ? 'bg-white text-emerald-700 border-slate-200'
+                              : 'bg-slate-50 text-slate-400 border-transparent hover:text-slate-600'
+                          }`}
+                        >
+                          Storage Change
+                        </button>
+                      )}
+                      {availableTabs.includes('rasterStats') && (
+                        <button
+                          onClick={() => setActiveTimeSeriesTab('rasterStats')}
+                          className={`px-3 py-1 text-[11px] font-medium rounded-t border border-b-0 transition-colors ${
+                            effectiveTab === 'rasterStats'
+                              ? 'bg-white text-violet-700 border-slate-200'
+                              : 'bg-slate-50 text-slate-400 border-transparent hover:text-slate-600'
+                          }`}
+                        >
+                          Raster Statistics
+                        </button>
+                      )}
+                      {availableTabs.includes('crossSection') && (
+                        <button
+                          onClick={() => setActiveTimeSeriesTab('crossSection')}
+                          className={`px-3 py-1 text-[11px] font-medium rounded-t border border-b-0 transition-colors ${
+                            effectiveTab === 'crossSection'
+                              ? 'bg-white text-blue-700 border-slate-200'
+                              : 'bg-slate-50 text-slate-400 border-transparent hover:text-slate-600'
+                          }`}
+                        >
+                          Cross Section
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <div className={`px-4 pb-4 pt-2 flex-1 flex flex-col ${showTabs ? 'border-t border-slate-200' : 'pt-4'}`}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-3">
-                      {showTabs && (
-                        <div className="flex bg-slate-100 rounded-md p-0.5">
-                          {availableTabs.includes('waterLevel') && (
-                            <button
-                              onClick={() => setActiveTimeSeriesTab('waterLevel')}
-                              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                                effectiveTab === 'waterLevel' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                              }`}
-                            >
-                              Water Level
-                            </button>
-                          )}
-                          {availableTabs.includes('storageChange') && (
-                            <button
-                              onClick={() => setActiveTimeSeriesTab('storageChange')}
-                              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                                effectiveTab === 'storageChange' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                              }`}
-                            >
-                              Storage Change
-                            </button>
-                          )}
-                          {availableTabs.includes('crossSection') && (
-                            <button
-                              onClick={() => setActiveTimeSeriesTab('crossSection')}
-                              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                                effectiveTab === 'crossSection' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                              }`}
-                            >
-                              Cross Section
-                            </button>
-                          )}
-                        </div>
-                      )}
                       {effectiveTab === 'waterLevel' ? (
                         <>
                           {!showTabs && <Activity size={18} className="text-blue-500" />}
@@ -1478,16 +1501,24 @@ const App: React.FC = () => {
                             {allRasterResults.length > 1 ? 'Storage Change Comparison' : `Storage Change: ${rasterResult!.title}`}
                           </h3>
                         </>
-                      ) : (
+                      ) : effectiveTab === 'rasterStats' ? (
+                        <>
+                          <h3 className="font-bold text-slate-800">
+                            Raster Statistics: {rasterResult!.title}
+                          </h3>
+                        </>
+                      ) : effectiveTab === 'crossSection' && crossSectionProfile ? (
                         <>
                           <h3 className="font-bold text-slate-800">
                             Cross Section A–A'
                           </h3>
                           <span className="text-xs text-slate-400">
-                            ({crossSectionProfile!.totalLength.toFixed(0)} {selectedRegion?.lengthUnit || 'ft'})
+                            ({crossSectionProfile.totalLength.toFixed(0)} {selectedRegion?.lengthUnit || 'ft'})
                           </span>
                         </>
-                      )}
+                      ) : rasterResult ? (
+                        <h3 className="font-bold text-slate-800">{rasterResult.title}</h3>
+                      ) : null}
                     </div>
                     <div className="flex items-center space-x-4">
                       {effectiveTab === 'waterLevel' ? (
@@ -1641,6 +1672,10 @@ const App: React.FC = () => {
                             <span>Export CSV</span>
                           </button>
                         </div>
+                      ) : effectiveTab === 'rasterStats' ? (
+                        <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
+                          {activeDataType.unit === 'm' ? 'Meters' : activeDataType.unit === 'ft' ? 'Feet' : activeDataType.unit} ({activeDataType.code.toUpperCase()})
+                        </div>
                       ) : (
                         <div className="text-[10px] text-slate-400">
                           {rasterFrameDate?.date || ''}
@@ -1693,6 +1728,13 @@ const App: React.FC = () => {
                         rasterTimeRange={rasterTimeRange}
                         trendWindowStart={showTrends ? Date.now() - trendWindowYears * MS_PER_YEAR : undefined}
                         dateFilter={dateFilter}
+                      />
+                    ) : effectiveTab === 'rasterStats' && rasterResult?.stats ? (
+                      <RasterStatsChart
+                        stats={rasterResult.stats}
+                        dataTypeName={activeDataType.name}
+                        dataTypeUnit={activeDataType.unit}
+                        referenceDate={rasterFrameDate?.dateTs}
                       />
                     ) : effectiveTab === 'crossSection' && crossSectionProfile ? (
                       <CrossSectionChart
@@ -1759,6 +1801,7 @@ const App: React.FC = () => {
                         </LineChart>
                       </ResponsiveContainer>
                     )}
+                  </div>
                   </div>
                 </div>
               );
