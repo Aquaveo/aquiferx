@@ -141,7 +141,12 @@ Click the measurements section in the hub to launch the Measurement Importer. Li
 
 ### Multi-Type Import
 
-Check **"Import multiple data types from one CSV"** to import several measurement types from a single file. Select the types you want to import and map each to its own CSV column. The app saves each type to its own `data_{code}.csv` file.
+Check **"Import multiple data types from one CSV"** to import several measurement types from a single file.
+
+1. A **Select All / Deselect All** toggle lets you quickly check or uncheck all available data types.
+2. Select the types you want to import.
+3. Map each type to its CSV column. The app **auto-matches** columns to data types by comparing column headers against type codes and names (exact match, case-insensitive match, or partial code match). You can override any auto-matched mapping manually.
+4. The app saves each type to its own `data_{code}.csv` file.
 
 ### Depth-to-Elevation Conversion
 

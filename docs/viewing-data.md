@@ -94,6 +94,23 @@ Selected wells display a **gold ring** around their marker. During box-drag sele
 
 When multiple wells are selected, the time series chart shows each well as a separate color-coded line (from an 8-color palette). The legend identifies each well by name.
 
+## Chart Panel Tabs
+
+The chart panel below the map uses a tabbed interface. The available tabs depend on context — tabs appear only when their data is available:
+
+| Tab | Available When | Shows |
+|-----|----------------|-------|
+| **Water Level** (or data type name) | Always | Time series for selected well(s) |
+| **Storage Change** | A raster is loaded | Cumulative storage volume curve |
+| **Raster Statistics** | A raster is loaded | Per-frame well-level statistics (mean, std dev, IQR, etc.) |
+| **Cross Section** | A cross-section line is drawn | Elevation profile along the line |
+
+The tab label for the first tab reflects the active data type — it reads "Water Level" for WTE data, or the data type name for other types (e.g., "Chloride", "pH").
+
+## Data Type Selector Sync
+
+When you load a raster or imputation model from the sidebar, the **data type selector** in the toolbar automatically switches to match that raster's or model's data type. For example, loading a chloride kriging raster switches the selector to "Chloride", updating the map markers and chart to show chloride data.
+
 ## Time Series Chart
 
 The chart panel below the map shows measurement data for the selected well(s).

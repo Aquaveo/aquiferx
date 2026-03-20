@@ -93,7 +93,7 @@ The analysis processes each time step, generating a raster frame at every interv
 
 Once complete, the raster appears in the sidebar under the selected aquifer. Click it to load the raster overlay on the map. From there you can:
 
-- [Visualize the raster](raster.md) — Playback animation, choose color ramps, toggle contour lines.
+- [Visualize the raster](raster.md) — Playback animation, choose color ramps, toggle contour lines, and view per-frame raster statistics.
 - [Analyze storage](storage.md) — View cumulative groundwater storage volume changes.
 - [Draw cross sections](cross-section.md) — Sample elevation profiles along any line.
 - [View active wells](active-wells.md) — See which wells contributed data at each time step.

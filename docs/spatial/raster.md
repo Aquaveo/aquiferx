@@ -14,7 +14,7 @@ AquiferX provides six color ramps for visualizing raster data. Select a color ra
 
 | Color Ramp | Description | Best For |
 |------------|-------------|----------|
-| **RYGB** | Red → Yellow → Green → Blue | Diverging data (decline vs. increase) |
+| **BGYR** (default) | Blue → Green → Yellow → Red | Sequential data (blue=low, red=high) |
 | **Viridis** | Purple → Green → Yellow | General-purpose, colorblind-friendly |
 | **Plasma** | Purple → Orange → Yellow | High-contrast sequential data |
 | **Turbo** | Red → Yellow → Green → Cyan → Blue | Smooth spectral, fine detail |
@@ -77,3 +77,41 @@ Right-click a raster in the sidebar and select "Rename" to change its display ti
 ### Delete
 
 Right-click a raster and select "Delete" to remove it. This deletes the raster JSON file from disk. A confirmation dialog is shown before deletion.
+
+## Raster Statistics
+
+When a raster is loaded, a **Raster Statistics** tab becomes available in the chart panel. This chart displays summary statistics computed from the well values at each raster time step, giving you a compact view of how the distribution of values across the aquifer changes over time.
+
+<!-- screenshot: Raster statistics chart showing mean line with std dev band -->
+
+### What Is Computed
+
+During raster generation, the following statistics are computed from the well values at each frame (not from the interpolated grid — from the actual well measurements used as input):
+
+| Statistic | Description |
+|-----------|-------------|
+| **Mean** | Average value across all contributing wells |
+| **Std Dev** | Standard deviation of well values |
+| **Median** | 50th percentile (middle value) |
+| **P25 / P75** | 25th and 75th percentiles (interquartile range) |
+| **Min / Max** | Extreme values across all contributing wells |
+| **Count** | Number of wells with data at that time step |
+
+### Chart Display
+
+The chart shows a solid **blue mean line** by default, with a light blue **±1 standard deviation band** shaded around it. A settings popover (gear icon in the top-right corner) lets you toggle additional overlays:
+
+| Overlay | Color | Default |
+|---------|-------|---------|
+| **Mean ± Std Dev** | Blue band | On |
+| **Median** | Purple dashed line | Off |
+| **P25–P75 (IQR)** | Teal band | Off |
+| **Min–Max** | Orange band | Off |
+
+### Synch Line
+
+When animating a raster, a vertical **red reference line** on the statistics chart tracks the current frame, keeping it in sync with the map overlay and other chart tabs.
+
+### Tooltip
+
+Hover over the chart to see the exact date, well count, and all active statistics at that time step.
