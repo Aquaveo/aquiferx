@@ -584,6 +584,16 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
             )}
             {isMultiType ? (
               <div className="space-y-2">
+                {dataTypes.length > 2 && (
+                  <button
+                    onClick={() => setSelectedTypes(
+                      selectedTypes.length === dataTypes.length ? [] : dataTypes.map(dt => dt.code)
+                    )}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    {selectedTypes.length === dataTypes.length ? 'Deselect All' : 'Select All'}
+                  </button>
+                )}
                 {dataTypes.map(dt => (
                   <div key={dt.code}>
                     <label className="flex items-center gap-2 cursor-pointer">
