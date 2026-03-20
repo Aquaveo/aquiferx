@@ -478,6 +478,10 @@ const App: React.FC = () => {
           if (aq) setSelectedAquifer(aq);
         }
         setRasterResult(fullResult);
+        // Sync data type selector to match the raster's data type
+        if (meta.dataType !== selectedDataType) {
+          setSelectedDataType(meta.dataType);
+        }
       }
     } catch (e) {
       console.error('Failed to load raster analysis:', e);
@@ -585,6 +589,10 @@ const App: React.FC = () => {
           if (aq) setSelectedAquifer(aq);
         }
         setSelectedModel(fullResult);
+        // Sync data type selector to match the model's data type
+        if (meta.dataType !== selectedDataType) {
+          setSelectedDataType(meta.dataType);
+        }
       }
     } catch (e) {
       console.error('Failed to load model:', e);
@@ -1207,7 +1215,18 @@ const App: React.FC = () => {
             {hasMultipleDataTypes && (
               <select
                 value={selectedDataType}
-                onChange={(e) => setSelectedDataType(e.target.value)}
+                onChange={(e) => {
+                  const newType = e.target.value;
+                  setSelectedDataType(newType);
+                  // Unload raster/model if its data type no longer matches
+                  if (rasterResult && rasterResult.dataType !== newType) {
+                    setRasterResult(null);
+                    setCompareRasterResults([]);
+                  }
+                  if (selectedModel && selectedModel.dataType !== newType) {
+                    setSelectedModel(null);
+                  }
+                }}
                 className="px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 {selectedRegion!.dataTypes.map(dt => (
