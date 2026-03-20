@@ -758,7 +758,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(({
 
       {/* Well Search */}
       {selectedAquifer && (
-        <div className="absolute top-3 left-14 z-[500]" style={{ width: '260px' }}>
+        <div className="absolute top-3 left-14 z-[90]" style={{ width: '260px' }}>
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <input
