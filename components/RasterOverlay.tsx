@@ -33,12 +33,12 @@ interface ColorRampDef {
 
 const COLOR_RAMPS: ColorRampDef[] = [
   {
-    id: 'rygb',
-    name: 'RYGB',
+    id: 'bgyr',
+    name: 'BGYR',
     lut: buildLUT([
-      [178, 24, 43], [214, 47, 39], [244, 109, 67], [253, 174, 97],
-      [254, 224, 139], [255, 255, 191], [217, 239, 139], [166, 217, 106],
-      [102, 189, 99], [26, 152, 80], [44, 123, 182], [33, 72, 141],
+      [33, 72, 141], [44, 123, 182], [26, 152, 80], [102, 189, 99],
+      [166, 217, 106], [217, 239, 139], [255, 255, 191], [254, 224, 139],
+      [253, 174, 97], [244, 109, 67], [214, 47, 39], [178, 24, 43],
     ], LUT_SIZE),
   },
   {
@@ -221,7 +221,7 @@ const RasterOverlay: React.FC<RasterOverlayProps> = ({
 }) => {
   const [frameIdx, setFrameIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [selectedRamp, setSelectedRamp] = useState('rygb');
+  const [selectedRamp, setSelectedRamp] = useState('bgyr');
   const [showRampPicker, setShowRampPicker] = useState(false);
   const overlayRef = useRef<L.ImageOverlay | null>(null);
   const contourGroupRef = useRef<L.LayerGroup | null>(null);
@@ -562,7 +562,7 @@ const RasterOverlay: React.FC<RasterOverlayProps> = ({
     return `linear-gradient(to bottom, ${stops.join(', ')})`;
   }, [activeLUT]);
 
-  const activeRampName = COLOR_RAMPS.find(r => r.id === selectedRamp)?.name || 'RYGB';
+  const activeRampName = COLOR_RAMPS.find(r => r.id === selectedRamp)?.name || 'BGYR';
 
   // --- Cursor value tooltip ---
   const [cursorValue, setCursorValue] = useState<{ x: number; y: number; val: number } | null>(null);
