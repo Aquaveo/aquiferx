@@ -46,17 +46,21 @@ async function fetchRegionList(): Promise<RegionInfo[]> {
         const gj = await gjRes.json();
         const features = gj.type === 'FeatureCollection' ? gj.features : [gj];
         let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
-        for (const f of features) {
-          const coords = f.geometry?.coordinates;
-          if (!coords) continue;
-          const flat = JSON.stringify(coords).match(/-?\d+\.?\d*/g)?.map(Number) || [];
-          for (let i = 0; i < flat.length - 1; i += 2) {
-            const lng = flat[i], lat = flat[i + 1];
+        const visitCoords = (arr: any) => {
+          if (typeof arr[0] === 'number') {
+            const [lng, lat] = arr;
             if (lat < minLat) minLat = lat;
             if (lat > maxLat) maxLat = lat;
             if (lng < minLng) minLng = lng;
             if (lng > maxLng) maxLng = lng;
+          } else {
+            for (const child of arr) visitCoords(child);
           }
+        };
+        for (const f of features) {
+          const coords = f.geometry?.coordinates;
+          if (!coords) continue;
+          visitCoords(coords);
         }
         info.bounds = [minLat, minLng, maxLat, maxLng];
       }
