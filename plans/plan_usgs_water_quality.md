@@ -449,6 +449,25 @@ Real-world data rarely has clean well ID matches. The Jamaica WQ upload had well
 
 **Proximity threshold** should have a sensible default (100m) with a user-adjustable control for edge cases (dense well fields might need a tighter threshold).
 
+##### Auto-generated well IDs
+
+When a new well is created from source data that has no well ID column (e.g. CSV with only name + lat/lon), the app generates a unique ID using the `aqx-` prefix:
+
+```
+aqx-{name_slug}-{lat}N{lon}W       (has name)
+aqx-{lat}N{lon}W                    (no name)
+```
+
+Examples:
+- `aqx-spring-garden-18.12N77.46W`
+- `aqx-18.1234N77.4567W`
+
+The `aqx-` prefix makes auto-generated IDs identifiable — easy to distinguish from USGS IDs (`USGS-06137570`), WQP agency IDs (`21FLBFA-12345`), or user-assigned IDs. The coordinate suffix ensures uniqueness even when names collide. The name slug is lowercase, alphanumeric + hyphens, truncated to keep IDs reasonable length.
+
+This only applies to CSV imports without a well ID column. WQP downloads always have proper agency-assigned IDs (`MonitoringLocationIdentifier`).
+
+Generated IDs are checked against existing `wells.csv` to avoid collisions. The data quality report notes how many wells received auto-generated IDs.
+
 ##### Flow after matching
 
 1. **After data is loaded** (from CSV or API), run the matching strategy above
