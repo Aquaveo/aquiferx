@@ -233,15 +233,29 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
       if (wellIds.length === 0) throw new Error('No well IDs found in wells.csv');
 
-      // Filter to USGS site IDs (they contain "USGS-" prefix typically)
-      const usgsSiteIds = wellIds.filter(id => id.startsWith('USGS-'));
-      if (usgsSiteIds.length === 0) throw new Error('No USGS site IDs found. USGS well IDs start with "USGS-".');
+      // Filter to USGS site IDs: accept "USGS-" prefixed or bare numeric (8-15 digit) IDs
+      // Build mapping from API-format siteId → wells.csv well_id
+      const apiToWellId: Record<string, string> = {};
+      for (const id of wellIds) {
+        if (id.startsWith('USGS-')) {
+          apiToWellId[id] = id;
+        } else if (/^\d{8,15}$/.test(id)) {
+          apiToWellId[`USGS-${id}`] = id;
+        }
+      }
+      const usgsSiteIds = Object.keys(apiToWellId);
+      if (usgsSiteIds.length === 0) throw new Error('No USGS site IDs found. Wells must have "USGS-" prefix or be 8-15 digit numeric IDs.');
 
       setUsgsProgress({ completed: 0, total: usgsSiteIds.length, done: false });
 
       const rawMeasurements = await fetchUSGSMeasurements(usgsSiteIds, (completed, total) => {
         setUsgsProgress({ completed, total, done: false });
       });
+
+      // Remap siteIds back to wells.csv well_id format
+      for (const m of rawMeasurements) {
+        m.siteId = apiToWellId[m.siteId] || m.siteId;
+      }
 
       // Validate and clean data
       const { measurements, report } = validateUSGSMeasurements(rawMeasurements);
@@ -258,7 +272,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           if (dataRes.ok) {
             const dataText = await dataRes.text();
             const { rows: dataRows } = parseCSV(dataText);
-            const usgsDateSet = new Set(usgsSiteIds);
+            const usgsDateSet = new Set(Object.values(apiToWellId));
             const usgsRows = dataRows.filter(r => usgsDateSet.has(r.well_id));
             if (usgsRows.length > 0) {
               const dates = usgsRows.map(r => r.date).filter(Boolean).sort();

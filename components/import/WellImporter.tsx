@@ -80,9 +80,17 @@ const WellImporter: React.FC<WellImporterProps> = ({
         if (res.ok) {
           const text = await res.text();
           const { rows } = parseCSV(text);
-          const usgsIds = new Set(
-            rows.map(r => r.well_id).filter(id => id && id.startsWith('USGS-'))
-          );
+          const usgsIds = new Set<string>();
+          for (const r of rows) {
+            const id = r.well_id;
+            if (!id) continue;
+            if (id.startsWith('USGS-')) {
+              usgsIds.add(id);
+            } else if (/^\d{8,15}$/.test(id)) {
+              // Bare numeric USGS site IDs — store with prefix so refresh dedup works
+              usgsIds.add(`USGS-${id}`);
+            }
+          }
           setExistingUsgsIds(usgsIds);
           setHasExistingUsgsWells(usgsIds.size > 0);
           // Build per-aquifer well counts
