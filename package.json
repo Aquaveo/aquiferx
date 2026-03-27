@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@aquaveo/geoglows-auth": "file:../geoglows-auth",
+    "@supabase/supabase-js": "^2.78.0",
     "@types/leaflet": "^1.9.21",
     "@types/proj4": "^2.5.6",
     "jszip": "^3.10.1",
@@ -17,6 +19,7 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^0.563.0",
     "ml-matrix": "^6.12.1",
+    "oidc-client-ts": "^3.5.0",
     "polylabel": "^2.0.1",
     "proj4": "^2.20.2",
     "react": "^19.2.4",

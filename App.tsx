@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3, Maximize2, X } from 'lucide-react';
 import { Region, Aquifer, Well, Measurement, DataType, RasterAnalysisResult, RasterAnalysisMeta, CrossSectionProfile, ImputationModelResult, ImputationModelMeta } from './types';
+import { SidebarUserMenu } from '@aquaveo/geoglows-auth/react';
 import { loadAllData } from './services/dataLoader';
 import { freshFetch } from './services/importUtils';
 import { slugify } from './utils/strings';
@@ -1283,6 +1284,7 @@ const App: React.FC = () => {
                 <span>Impute Gaps</span>
               </button>
             )}
+            <SidebarUserMenu variant='light' />   
             <button
               onClick={() => setIsDataManagerOpen(true)}
               className="flex items-center space-x-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors"
@@ -1290,6 +1292,7 @@ const App: React.FC = () => {
               <Database size={16} />
               <span>Manage Data</span>
             </button>
+               
           </div>
         </header>
 
