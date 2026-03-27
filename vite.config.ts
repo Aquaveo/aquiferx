@@ -6,6 +6,24 @@ import react from '@vitejs/plugin-react';
 function saveDataPlugin(): Plugin {
   return {
     name: 'save-data',
+    buildStart() {
+      // Generate public/data/regions.json so it's available as a static file
+      // in both dev (served from public/) and production builds (copied to dist/).
+      const dataDir = path.resolve(__dirname, 'public/data');
+      if (!fs.existsSync(dataDir)) return;
+      const entries = fs.readdirSync(dataDir, { withFileTypes: true });
+      const regions: any[] = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const regionJsonPath = path.join(dataDir, entry.name, 'region.json');
+        if (fs.existsSync(regionJsonPath)) {
+          try {
+            regions.push(JSON.parse(fs.readFileSync(regionJsonPath, 'utf-8')));
+          } catch { /* skip malformed region.json */ }
+        }
+      }
+      fs.writeFileSync(path.join(dataDir, 'regions.json'), JSON.stringify(regions));
+    },
     configureServer(server) {
       // GET /api/regions — scan public/data/ subdirectories for region.json
       server.middlewares.use('/api/regions', (req, res) => {
