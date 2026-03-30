@@ -1,4 +1,4 @@
-# USGS Water Quality Download Integration
+# Water Quality Download Integration (WQP)
 
 ## Background
 
@@ -94,7 +94,7 @@ The USGS Samples Data API (`api.waterdata.usgs.gov/samples-data/`) was also eval
 
 ## Available Water Quality Parameter Categories
 
-These are the `characteristicGroup` (Samples API) / `characteristicType` (WQP) values most relevant to groundwater:
+These are the `characteristicType` (WQP) values most relevant to groundwater:
 
 | Category | Examples | Typical Units |
 |----------|----------|---------------|
@@ -116,7 +116,7 @@ These are the `characteristicGroup` (Samples API) / `characteristicType` (WQP) v
 
 | Aspect | Water Levels (current) | Water Quality (new) |
 |--------|----------------------|---------------------|
-| API | OGC API (`/ogcapi/v0`) | Samples Data API (`/samples-data`) |
+| API | OGC API (`/ogcapi/v0`) | WQP (`waterqualitydata.us`) |
 | Query style | CQL2 POST filter | REST GET with query params |
 | Parameters | Single (72019) | Dozens — user must choose |
 | Values per sample | One value per date | Multiple characteristics per sample event |
@@ -157,11 +157,11 @@ Each data type gets its own CSV file: `data_{code}.csv`. The `DataTypeEditor` co
 - Codes are user-defined and flexible
 - No wasted metadata for parameters a region will never use
 
-### Problems that emerge with USGS integration
-- No mapping from USGS characteristic names to local codes
+### Problems that emerge with WQP integration
+- No mapping from WQP characteristic names to local codes
 - Inconsistency risk — Jamaica has `flouride` (typo) as a code; another region could create `fluoride`
 - Cross-region comparison is fragile when codes/units don't match
-- Every USGS download would force manual data type creation before importing
+- Every WQP download would force manual data type creation before importing
 
 ---
 
@@ -236,9 +236,9 @@ A global lookup table of well-known water quality parameters:
 
 ### What the catalog provides
 
-1. **USGS download mapping** — When results come back with `Result_Characteristic = "Nitrate"`, the catalog maps it to code `nitrate`, unit `mg/L`, etc.
+1. **WQP download mapping** — When results come back with `CharacteristicName = "Nitrate"`, the catalog maps it to code `nitrate`, unit `mg/L`, etc.
 2. **Standardized defaults for the DataTypeEditor** — Instead of (or in addition to) cross-region suggestions, show catalog entries as "standard" options. This prevents typos and inconsistency.
-3. **Parameter picker for USGS downloads** — The catalog groups parameters by category, making it easy to build a grouped checkbox UI for selecting what to download.
+3. **Parameter picker for WQP downloads** — The catalog groups parameters by category, making it easy to build a grouped checkbox UI for selecting what to download.
 4. **Region-level override** — A region still owns its `dataTypes` array. If Jamaica wants to call it "Sulphate" instead of "Sulfate", or use `mgCaCO3/L` for hardness, that's fine. The catalog provides defaults; the region has final say.
 
 ### How per-region types and the catalog interact
@@ -294,7 +294,7 @@ interface ParameterCatalog {
 | `DataType` interface | No change — stays as `{ code, name, unit }` |
 | `region.json` | No change — catalog codes are just used as defaults |
 | USGS well download | No change to well discovery |
-| USGS measurement download | New flow: query Samples Data API, map results through catalog to data types |
+| WQP measurement download | New flow: query WQP, map results through catalog to data types |
 
 ### DataTypeEditor redesign
 
@@ -402,7 +402,7 @@ Region → Aquifers → Wells → Measurements
 
 The MeasurementImporter assumes all wells already exist in `wells.csv`. But in practice, measurement data often comes bundled with well identities — and some of those wells may not exist yet:
 
-- **USGS water quality download**: The Samples API returns well locations alongside results. Some wells may not be in `wells.csv`.
+- **WQP water quality download**: The WQP Station endpoint returns well locations alongside results. Some wells may not be in `wells.csv`.
 - **CSV upload (e.g. Jamaica)**: The Excel files had well name + lat/lon + WQ columns. Some wells were new — not in the water-level well set. User had to manually add wells first, then come back to import measurements.
 - **USGS water level download**: Currently works around this by requiring wells to be downloaded first (separate step). But it's the same underlying issue.
 
@@ -491,7 +491,7 @@ This also means **un-dimming the Measurements card** when wellCount = 0, at leas
 
 ##### Benefits across all import flows
 
-- **WQP download:** wells come from the Station endpoint (`LatitudeMeasure`, `LongitudeMeasure`, `MonitoringLocationName`). Matching by site ID (USGS wells) or proximity (non-USGS wells).
+- **WQP download:** wells come from the Station endpoint (`LatitudeMeasure`, `LongitudeMeasure`, `MonitoringLocationName`). Matching by site ID (agency-assigned IDs) or proximity.
 - **USGS water level download:** could also benefit (currently a separate well download step)
 - **CSV upload:** if the CSV has lat/lon columns, same logic applies. Would have solved the Jamaica import problem — matching by proximity instead of requiring exact IDs.
 
@@ -501,16 +501,16 @@ The MeasurementImporter keeps its current structure with data source tabs. For U
 
 ```
 Data Source:
-[ Upload CSV ]  [ USGS Water Levels ]  [ USGS Water Quality ]
-                 ^^^^^^^^^^^^^^^^^^^    ^^^^^^^^^^^^^^^^^^^^
+[ Upload CSV ]  [ USGS Water Levels ]  [ Water Quality (WQP) ]
+                 ^^^^^^^^^^^^^^^^^^^    ^^^^^^^^^^^^^^^^^^^^^^
                  (US regions only)      (US regions only)
 ```
 
-The existing `isInUS()` check (already used in WellImporter) gates visibility of the USGS tabs.
+The existing `isInUS()` check (already used in WellImporter) gates visibility of the USGS and WQP tabs.
 
 **USGS Water Levels** = current flow (parameter 72019, OGC API, works with existing well IDs)
 
-**USGS Water Quality** = new flow:
+**Water Quality (WQP)** = new flow:
 1. Parameter picker (catalog-backed grouped checkboxes)
 2. Date range filter (default: last 10 years, adjustable)
 3. Count preview before download (WQP count query) — guard against massive downloads
@@ -561,7 +561,7 @@ WQP supports count queries via `mimeType=csv` with `dataProfile=count`, or by re
 
 ### 9. Collision handling: wells, data types, and measurements
 
-Collisions happen at three levels when importing WQ data (from WQP download or CSV) into a region that already has data.
+Collisions happen at three levels when importing WQ data (from a WQP download or CSV) into a region that already has data.
 
 #### Well collisions
 
@@ -626,11 +626,11 @@ The `data_{code}.csv` format expects one value per well per date, so deduplicati
 **Not fully resolved** — needs investigation of actual WQP response data during implementation to understand how common this is and whether more nuanced handling is needed.
 
 ### 10. Reuse of existing infrastructure
-- `fetchWithRetry` — pattern reusable, but WQP is a different domain (no API key needed), so a simpler WQP-specific fetch function is probably cleaner
+- `fetchWithRetry` — pattern reusable, but WQP needs no API key, so a simpler WQP-specific fetch function is probably cleaner
 - `validateUSGSMeasurements` — date validation logic reusable, value range checks need to be per-characteristic
 - `assignWellToAquifer` (point-in-polygon) — reuse for auto-assigning new wells to aquifers
 - GSE interpolation (USGS 3DEP / Open-Meteo) — reuse for new wells
-- `isInUS()` — reuse for gating USGS/WQP options (already used in WellImporter)
+- `isInUS()` — reuse for gating the WQP download tab (already used in WellImporter)
 - Data quality report — same pattern, extended for WQ-specific issues
 
 ---
@@ -644,8 +644,8 @@ The `data_{code}.csv` format expects one value per well per date, so deduplicati
 | **Smart well discovery** (matching + auto-add) | All regions | Any CSV import with lat/lon benefits, regardless of country |
 | **Proximity-based well matching** | All regions | Solves the Jamaica-style name mismatch problem everywhere |
 | **Data-type-aware map filtering** | All regions | Show only relevant wells for the active data type |
-| **WQP water quality download** | US only | Download tab gated by `isInUS()` |
-| **USGS water level download** | US only | Already gated by `isInUS()` (no change) |
+| **Water quality download (WQP)** | US only | Download tab gated by `isInUS()` |
+| **Water level download (USGS OGC)** | US only | Already gated by `isInUS()` (no change) |
 
 The catalog + DataTypeEditor + smart well discovery are **standalone deliverables** that benefit every region immediately and lay the foundation for the WQP download. They can ship first.
 
@@ -667,10 +667,11 @@ The catalog + DataTypeEditor + smart well discovery are **standalone deliverable
 - Auto-add new wells during measurement import when lat/lon available
 - Benefits CSV uploads immediately (Jamaica-style problem solved)
 
-**Phase 4: WQP water quality download** (US only)
+**Phase 4: Water quality download via WQP** (US only)
 - WQP API client (fetch results, fetch stations)
 - Parameter picker (reuses catalog browser component from Phase 1)
 - Date range filter + count preview + download safeguards
+- Data source toggle (USGS only vs. all agencies)
 - Deduplication strategy
 - Integration into MeasurementImporter as third data source tab
 
