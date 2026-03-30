@@ -6,6 +6,7 @@ import { SidebarUserMenu } from '@aquaveo/geoglows-auth/react';
 import { loadAllData } from './services/dataLoader';
 import { freshFetch } from './services/importUtils';
 import { slugify } from './utils/strings';
+import { appUrl } from './utils/paths';
 import MapView, { MapViewHandle } from './components/MapView';
 import Sidebar from './components/Sidebar';
 import TimeSeriesChart from './components/TimeSeriesChart';
@@ -470,7 +471,7 @@ const App: React.FC = () => {
   const handleLoadRaster = async (meta: RasterAnalysisMeta) => {
     setLoadingRasterCode(meta.code);
     try {
-      const res = await fetch(`/data/${meta.filePath}`);
+      const res = await fetch(appUrl(`/data/${meta.filePath}`));
       if (res.ok) {
         const fullResult: RasterAnalysisResult = await res.json();
         // Select the aquifer if not already selected
@@ -511,7 +512,7 @@ const App: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(`/data/${meta.filePath}`);
+      const res = await fetch(appUrl(`/data/${meta.filePath}`));
       if (res.ok) {
         const fullResult: RasterAnalysisResult = await res.json();
         setCompareRasterResults(prev => [...prev, fullResult]);
@@ -530,7 +531,7 @@ const App: React.FC = () => {
     setRasterMeta(prev => prev.filter(m => !(m.code === meta.code && m.dataType === meta.dataType && m.regionId === meta.regionId)));
     // Delete the file on disk
     try {
-      await fetch('/api/delete-file', {
+      await fetch(appUrl('/api/delete-file'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filePath: meta.filePath }),
@@ -548,7 +549,7 @@ const App: React.FC = () => {
     const newPath = `${dir}/raster_${meta.dataType}_${newCode}.json`;
 
     try {
-      const res = await fetch('/api/rename-raster', {
+      const res = await fetch(appUrl('/api/rename-raster'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldPath, newPath, newCode, newTitle }),
@@ -582,7 +583,7 @@ const App: React.FC = () => {
   // --- Imputation model handlers ---
   const handleLoadModel = async (meta: ImputationModelMeta) => {
     try {
-      const res = await fetch(`/data/${meta.filePath}`);
+      const res = await fetch(appUrl(`/data/${meta.filePath}`));
       if (res.ok) {
         const fullResult: ImputationModelResult = await res.json();
         if (!selectedAquifer || selectedAquifer.id !== meta.aquiferId) {
@@ -610,7 +611,7 @@ const App: React.FC = () => {
     }
     setModelMeta(prev => prev.filter(m => !(m.code === meta.code && m.regionId === meta.regionId)));
     try {
-      await fetch('/api/delete-file', {
+      await fetch(appUrl('/api/delete-file'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filePath: meta.filePath }),
@@ -627,7 +628,7 @@ const App: React.FC = () => {
     const newPath = `${dir}/model_wte_${newCode}.json`;
 
     try {
-      const res = await fetch('/api/rename-model', {
+      const res = await fetch(appUrl('/api/rename-model'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldPath, newPath, newCode, newTitle }),
@@ -819,7 +820,7 @@ const App: React.FC = () => {
       singleUnit: region.singleUnit,
       dataTypes: region.dataTypes
     };
-    await fetch('/api/save-data', {
+    await fetch(appUrl('/api/save-data'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files: [{ path: `${regionId}/region.json`, content: JSON.stringify(regionMeta, null, 2) }] }),
@@ -842,7 +843,7 @@ const App: React.FC = () => {
       return !well || well.regionId !== regionId;
     }));
     // Delete folder on disk
-    await fetch('/api/delete-folder', {
+    await fetch(appUrl('/api/delete-folder'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folder: regionId }),
@@ -905,7 +906,7 @@ const App: React.FC = () => {
       }))
     );
     const geojsonContent = JSON.stringify({ type: 'FeatureCollection', features }, null, 2);
-    await fetch('/api/save-data', {
+    await fetch(appUrl('/api/save-data'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files: [{ path: `${regionId}/aquifers.geojson`, content: geojsonContent }] }),
@@ -962,7 +963,7 @@ const App: React.FC = () => {
       dataFiles.push({ path: `${regionId}/data_${dt.code}.csv`, content: [header, ...rows].join('\n') });
     }
 
-    await fetch('/api/save-data', {
+    await fetch(appUrl('/api/save-data'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1067,7 +1068,7 @@ const App: React.FC = () => {
       `${m.wellId},"${m.wellName}",${m.date},${m.value},${m.aquiferId}`
     );
     const csvContent = [header, ...rows].join('\n');
-    await fetch('/api/save-data', {
+    await fetch(appUrl('/api/save-data'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files: [{ path: `${regionId}/data_${dtCode}.csv`, content: csvContent }] }),

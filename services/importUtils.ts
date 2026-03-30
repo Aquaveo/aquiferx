@@ -1,11 +1,15 @@
 import shp from 'shpjs';
 import JSZip from 'jszip';
 import { reprojectGeoJSON, reprojectFromWKT } from './reprojection';
+import { appUrl } from '../utils/paths';
 
 /** Fetch with cache-busting to avoid stale browser-cached data after writes.
- *  Also detects Vite SPA fallback (returns index.html for missing files) and treats as 404. */
+ *  Also detects Vite SPA fallback (returns index.html for missing files) and treats as 404.
+ *  Absolute paths (starting with /) are resolved relative to BASE_URL so they work
+ *  when the app is served under a sub-path (e.g. /aquifer-analyst/). */
 export async function freshFetch(url: string): Promise<Response> {
-  const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}_t=${Date.now()}`);
+  const resolved = url.startsWith('/') ? appUrl(url) : url;
+  const res = await fetch(`${resolved}${resolved.includes('?') ? '&' : '?'}_t=${Date.now()}`);
   const ct = res.headers.get('content-type') || '';
   if (res.ok && ct.includes('text/html') && !url.endsWith('.html')) {
     return new Response(null, { status: 404, statusText: 'Not Found' });
@@ -302,7 +306,7 @@ export async function processUploadedFile(
 
 // Save files via API
 export async function saveFiles(files: { path: string; content: string }[]): Promise<void> {
-  const res = await fetch('/api/save-data', {
+  const res = await fetch(appUrl('/api/save-data'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ files })
@@ -312,7 +316,7 @@ export async function saveFiles(files: { path: string; content: string }[]): Pro
 
 // Delete a single file via API
 export async function deleteFile(filePath: string): Promise<void> {
-  const res = await fetch('/api/delete-file', {
+  const res = await fetch(appUrl('/api/delete-file'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ filePath })

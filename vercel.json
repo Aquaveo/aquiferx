@@ -1,0 +1,9 @@
+{
+  "buildCommand": "npx vite build --base=/aquifer-analyst/",
+  "outputDirectory": "dist",
+  "framework": null,
+  "installCommand": "npm install",
+  "rewrites": [
+    { "source": "/api/regions", "destination": "/data/regions.json" }
+  ]
+}

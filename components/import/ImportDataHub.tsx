@@ -3,6 +3,7 @@ import { X, MapPin, Layers, Navigation, BarChart3, Plus, Settings, Download, Upl
 import JSZip from 'jszip';
 import { RegionMeta, DataType } from '../../types';
 import { freshFetch, saveFiles } from '../../services/importUtils';
+import { appUrl } from '../../utils/paths';
 import RegionImporter from './RegionImporter';
 import AquiferImporter from './AquiferImporter';
 import WellImporter from './WellImporter';
@@ -25,7 +26,7 @@ interface RegionInfo extends RegionMeta {
 }
 
 async function fetchRegionList(): Promise<RegionInfo[]> {
-  const res = await fetch('/api/regions');
+  const res = await fetch(appUrl('/api/regions'));
   if (!res.ok) return [];
   const metas: RegionMeta[] = await res.json();
 
@@ -219,7 +220,7 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
       if (importDbMode === 'replace') {
         for (const existing of regionList) {
           try {
-            await fetch('/api/delete-folder', {
+            await fetch(appUrl('/api/delete-folder'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ folderPath: `data/${existing.id}` })

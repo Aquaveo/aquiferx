@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { DataType, RegionMeta } from '../../types';
 import { saveFiles, deleteFile } from '../../services/importUtils';
+import { appUrl } from '../../utils/paths';
 import ConfirmDialog from './ConfirmDialog';
 
 interface DataTypeEditorProps {
@@ -48,7 +49,7 @@ const DataTypeEditor: React.FC<DataTypeEditorProps> = ({
     // Fetch suggestions from other regions
     const fetchSuggestions = async () => {
       try {
-        const res = await fetch('/api/regions');
+        const res = await fetch(appUrl('/api/regions'));
         if (!res.ok) return;
         const allRegions: RegionMeta[] = await res.json();
         const existing = new Set(types.map(t => t.code));
