@@ -307,6 +307,31 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
     return Array.from(byTime.values()).sort((a, b) => (a.date as number) - (b.date as number));
   }, [chartData, trendData, smoothData]);
 
+  // Y-axis domain — must be declared before any early returns to satisfy React's
+  // rules of hooks (same number of hooks on every render).
+  const yDomain = useMemo(() => {
+    if (!showGSE) return ['auto', 'auto'] as const;
+    const gseValues = selectedWells
+      .map(w => w.gse)
+      .filter(v => v != null && !isNaN(v));
+    if (gseValues.length === 0) return ['auto', 'auto'] as const;
+
+    const allValues: number[] = [];
+    for (const point of finalChartData) {
+      for (const key of Object.keys(point)) {
+        if ((key.startsWith('val_') || key.startsWith('trend_') || key.startsWith('smooth_')) && point[key] != null) {
+          allValues.push(point[key] as number);
+        }
+      }
+    }
+    if (allValues.length === 0) return ['auto', 'auto'] as const;
+
+    const dataMin = Math.min(...allValues);
+    const dataMax = Math.max(...allValues, ...gseValues);
+    const padding = (dataMax - dataMin) * 0.05 || 1;
+    return [dataMin - padding, dataMax + padding];
+  }, [showGSE, selectedWells, finalChartData]);
+
   modalsOpenRef.current = !!(contextMenu || editModal || deleteModal);
   // Sync data domain for pixel-to-timestamp fallback in zoom handler
   if (zoomLeft != null && zoomRight != null) {
@@ -436,29 +461,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ measurements, selecte
   }
 
   const yAxisLabel = `${dataType.name} (${dataType.unit})`;
-
-  const yDomain = useMemo(() => {
-    if (!showGSE) return ['auto', 'auto'] as const;
-    const gseValues = selectedWells
-      .map(w => w.gse)
-      .filter(v => v != null && !isNaN(v));
-    if (gseValues.length === 0) return ['auto', 'auto'] as const;
-
-    const allValues: number[] = [];
-    for (const point of finalChartData) {
-      for (const key of Object.keys(point)) {
-        if ((key.startsWith('val_') || key.startsWith('trend_') || key.startsWith('smooth_')) && point[key] != null) {
-          allValues.push(point[key] as number);
-        }
-      }
-    }
-    if (allValues.length === 0) return ['auto', 'auto'] as const;
-
-    const dataMin = Math.min(...allValues);
-    const dataMax = Math.max(...allValues, ...gseValues);
-    const padding = (dataMax - dataMin) * 0.05 || 1;
-    return [dataMin - padding, dataMax + padding];
-  }, [showGSE, selectedWells, finalChartData]);
 
   // --- Dot hit-testing ---
   // Clear positions for this render cycle; dot render functions repopulate it

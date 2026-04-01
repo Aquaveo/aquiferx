@@ -350,6 +350,12 @@ const RasterOverlay: React.FC<RasterOverlayProps> = ({
     canvasRef.current = null;
     setFrameIdx(0);
     setPlaying(false);
+    return () => {
+      // StrictMode cleanup: remove layers created by subsequent renderFrame effect
+      if (overlayRef.current) { map.removeLayer(overlayRef.current); overlayRef.current = null; }
+      if (contourGroupRef.current) { map.removeLayer(contourGroupRef.current); contourGroupRef.current = null; }
+      canvasRef.current = null;
+    };
   }, [analysis, map]);
 
   // Render first frame on mount, and re-render on frame/ramp change
@@ -776,4 +782,4 @@ const RasterOverlay: React.FC<RasterOverlayProps> = ({
   );
 };
 
-export default RasterOverlay;
+export default React.memo(RasterOverlay);

@@ -194,6 +194,7 @@ const ExpandedChartWindow: React.FC<{
 };
 
 const App: React.FC = () => {
+
   const [regions, setRegions] = useState<Region[]>([]);
   const [aquifers, setAquifers] = useState<Aquifer[]>([]);
   const [wells, setWells] = useState<Well[]>([]);
@@ -244,6 +245,16 @@ const App: React.FC = () => {
   const mapViewRef = useRef<MapViewHandle>(null);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const chartPanelRef = useRef<HTMLDivElement>(null);
+
+  // Refs for async handlers to avoid stale closures after await
+  const selectedAquiferRef = useRef(selectedAquifer);
+  selectedAquiferRef.current = selectedAquifer;
+  const selectedDataTypeRef = useRef(selectedDataType);
+  selectedDataTypeRef.current = selectedDataType;
+  // Guards: prevent the aquifer-change effect from clearing state that a
+  // concurrent raster/model load is about to set
+  const loadingRasterRef = useRef(false);
+  const loadingModelRef = useRef(false);
 
   // Divider drag handlers — direct DOM manipulation during drag to avoid full re-renders
   const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
@@ -306,10 +317,12 @@ const App: React.FC = () => {
     setShowTrends(false);
   }, [selectedRegion?.id, selectedDataType]);
 
-  // Clear active raster overlay and model when aquifer changes
+  // Clear active raster overlay and model when aquifer changes — but not
+  // when the change was triggered by an in-flight raster/model load that is
+  // about to set new results (otherwise the effect races against the load).
   useEffect(() => {
-    setRasterResult(null);
-    setSelectedModel(null);
+    if (!loadingRasterRef.current) setRasterResult(null);
+    if (!loadingModelRef.current) setSelectedModel(null);
   }, [selectedAquifer?.id]);
 
   // Auto-switch time series tab based on raster result
@@ -328,13 +341,17 @@ const App: React.FC = () => {
     setCompareRasterResults([]);
   }, [rasterResult]);
 
-  // Auto-switch to cross-section tab when profile is set
+  // Auto-switch to cross-section tab when profile is set/cleared.
+  // Reads rasterResult only to pick a fallback tab on dismiss — intentionally
+  // excluded from deps so a raster change doesn't yank the user off this tab.
   useEffect(() => {
     if (crossSectionProfile) {
       setActiveTimeSeriesTab('crossSection');
     } else if (activeTimeSeriesTab === 'crossSection') {
-      setActiveTimeSeriesTab(rasterResult?.dataType === 'wte' ? 'storageChange' : rasterResult?.stats ? 'rasterStats' : 'waterLevel');
+      const rr = rasterResult;
+      setActiveTimeSeriesTab(rr?.dataType === 'wte' ? 'storageChange' : rr?.stats ? 'rasterStats' : 'waterLevel');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [crossSectionProfile]);
 
   // Compute the data time range (in years) for the selected region/data type
@@ -467,40 +484,50 @@ const App: React.FC = () => {
 
   // Load full raster analysis from file
   const handleLoadRaster = async (meta: RasterAnalysisMeta) => {
+    loadingRasterRef.current = true;
     setLoadingRasterCode(meta.code);
     try {
       const res = await fetch(`/data/${meta.filePath}`);
       if (res.ok) {
         const fullResult: RasterAnalysisResult = await res.json();
-        // Select the aquifer if not already selected
-        if (!selectedAquifer || selectedAquifer.id !== meta.aquiferId) {
+        // Select the aquifer if not already selected (use ref for current value)
+        if (!selectedAquiferRef.current || selectedAquiferRef.current.id !== meta.aquiferId) {
           const aq = aquifers.find(a => a.id === meta.aquiferId && a.regionId === meta.regionId);
           if (aq) setSelectedAquifer(aq);
         }
         setRasterResult(fullResult);
         // Sync data type selector to match the raster's data type
-        if (meta.dataType !== selectedDataType) {
+        if (meta.dataType !== selectedDataTypeRef.current) {
           setSelectedDataType(meta.dataType);
         }
       }
     } catch (e) {
       console.error('Failed to load raster analysis:', e);
     } finally {
+      loadingRasterRef.current = false;
       setLoadingRasterCode(null);
     }
   };
 
   const handleRasterFrameChange = useCallback((date: string, dateTs: number) => {
-    setRasterFrameDate({ date, dateTs });
+    setRasterFrameDate(prev => {
+      if (prev && prev.date === date && prev.dateTs === dateTs) return prev;
+      return { date, dateTs };
+    });
   }, []);
 
   const handleCrossSectionChange = useCallback((profile: CrossSectionProfile | null) => {
     setCrossSectionProfile(profile);
   }, []);
 
-  const handleUnloadRaster = () => {
+  const handleUnloadRaster = useCallback(() => {
     setRasterResult(null);
-  };
+    setShowActiveWells(false);
+  }, []);
+
+  const handleToggleActiveWells = useCallback(() => {
+    setShowActiveWells(v => !v);
+  }, []);
 
   const handleToggleCompareRaster = async (meta: RasterAnalysisMeta) => {
     if (rasterResult && rasterResult.code === meta.code && rasterResult.dataType === meta.dataType && rasterResult.regionId === meta.regionId) return;
@@ -580,22 +607,25 @@ const App: React.FC = () => {
 
   // --- Imputation model handlers ---
   const handleLoadModel = async (meta: ImputationModelMeta) => {
+    loadingModelRef.current = true;
     try {
       const res = await fetch(`/data/${meta.filePath}`);
       if (res.ok) {
         const fullResult: ImputationModelResult = await res.json();
-        if (!selectedAquifer || selectedAquifer.id !== meta.aquiferId) {
+        if (!selectedAquiferRef.current || selectedAquiferRef.current.id !== meta.aquiferId) {
           const aq = aquifers.find(a => a.id === meta.aquiferId && a.regionId === meta.regionId);
           if (aq) setSelectedAquifer(aq);
         }
         setSelectedModel(fullResult);
         // Sync data type selector to match the model's data type
-        if (meta.dataType !== selectedDataType) {
+        if (meta.dataType !== selectedDataTypeRef.current) {
           setSelectedDataType(meta.dataType);
         }
       }
     } catch (e) {
       console.error('Failed to load model:', e);
+    } finally {
+      loadingModelRef.current = false;
     }
   };
 
@@ -1407,13 +1437,13 @@ const App: React.FC = () => {
               <RasterOverlay
                 analysis={rasterResult}
                 map={mapViewRef.current.getMap()!}
-                onClose={() => { setRasterResult(null); setShowActiveWells(false); }}
+                onClose={handleUnloadRaster}
                 onFrameChange={handleRasterFrameChange}
                 lengthUnit={selectedRegion?.lengthUnit || 'ft'}
                 onCrossSectionChange={handleCrossSectionChange}
                 dataTypeName={activeDataType.name}
                 showActiveWells={showActiveWells}
-                onToggleActiveWells={() => setShowActiveWells(v => !v)}
+                onToggleActiveWells={handleToggleActiveWells}
               />
             )}
           </div>
