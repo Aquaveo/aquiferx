@@ -1,6 +1,6 @@
 # Storage Analysis
 
-When a raster analysis is loaded, AquiferX computes and displays a **cumulative storage change curve** showing how the volume of groundwater in the aquifer changes over time.
+When a raster analysis is loaded, Aquifer Analyst computes and displays a **cumulative storage change curve** showing how the volume of groundwater in the aquifer changes over time.
 
 ## How Storage Change Is Computed
 

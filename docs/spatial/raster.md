@@ -10,7 +10,7 @@ In the sidebar, expand the selected aquifer to see the list of computed raster a
 
 ## Color Ramps
 
-AquiferX provides six color ramps for visualizing raster data. Select a color ramp from the dropdown in the raster controls panel.
+Aquifer Analyst provides six color ramps for visualizing raster data. Select a color ramp from the dropdown in the raster controls panel.
 
 | Color Ramp | Description | Best For |
 |------------|-------------|----------|

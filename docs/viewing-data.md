@@ -1,6 +1,6 @@
 # Viewing Data
 
-Once data is loaded into AquiferX, you can explore it through the sidebar tree, interactive map, and time series chart.
+Once data is loaded into Aquifer Analyst, you can explore it through the sidebar tree, interactive map, and time series chart.
 
 ## Sidebar Navigation
 
@@ -75,7 +75,7 @@ Selecting a well from the search results flies the map to that well's location a
 
 ## Well Selection
 
-AquiferX supports several ways to select wells for viewing in the time series chart.
+Aquifer Analyst supports several ways to select wells for viewing in the time series chart.
 
 ### Single Selection
 

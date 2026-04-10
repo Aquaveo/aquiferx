@@ -1,6 +1,6 @@
 # Interpolation Methods
 
-AquiferX provides two spatial interpolation methods for generating raster surfaces from well data: **Kriging** and **Inverse Distance Weighting (IDW)**.
+Aquifer Analyst provides two spatial interpolation methods for generating raster surfaces from well data: **Kriging** and **Inverse Distance Weighting (IDW)**.
 
 ## Kriging
 
@@ -20,7 +20,7 @@ The weights are determined by solving a linear system based on the spatial covar
 
 ### Variogram Models
 
-The covariance function describes how spatial correlation decays with distance. AquiferX supports three variogram models, each defining a different decay shape:
+The covariance function describes how spatial correlation decays with distance. Aquifer Analyst supports three variogram models, each defining a different decay shape:
 
 #### Gaussian
 

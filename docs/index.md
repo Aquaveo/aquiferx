@@ -1,6 +1,6 @@
-# AquiferX
+# Aquifer Analyst
 
-**AquiferX** is a web-based groundwater data visualization and analysis application. It provides a complete toolkit for loading, exploring, and analyzing groundwater monitoring data — from raw well measurements to spatial interpolation, trend analysis, and machine-learning-based data imputation.
+**Aquifer Analyst** is a web-based groundwater data visualization and analysis application. It provides a complete toolkit for loading, exploring, and analyzing groundwater monitoring data — from raw well measurements to spatial interpolation, trend analysis, and machine-learning-based data imputation.
 
 <!-- screenshot: Main application interface showing map with wells, sidebar, and time series chart -->
 
@@ -24,7 +24,7 @@
 
 ## Who Is This For?
 
-AquiferX is designed for hydrogeologists, water resource engineers, researchers, and students who work with groundwater monitoring data. Whether you are managing a regional monitoring network, conducting aquifer characterization, or teaching groundwater concepts, AquiferX provides an accessible, browser-based interface for common analysis workflows.
+Aquifer Analyst is designed for hydrogeologists, water resource engineers, researchers, and students who work with groundwater monitoring data. Whether you are managing a regional monitoring network, conducting aquifer characterization, or teaching groundwater concepts, Aquifer Analyst provides an accessible, browser-based interface for common analysis workflows.
 
 ## Getting Started
 
@@ -32,4 +32,4 @@ Ready to dive in? Head to the [Getting Started](getting-started.md) guide to ins
 
 ## License
 
-AquiferX is released under the [MIT License](../LICENSE).
+Aquifer Analyst is released under the [MIT License](../LICENSE).

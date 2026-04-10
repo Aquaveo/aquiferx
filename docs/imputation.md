@@ -1,6 +1,6 @@
 # Imputing Data Gaps
 
-Groundwater monitoring records often have gaps — wells may be measured infrequently, monitoring may start and stop, or sensors may fail. AquiferX's **Impute Data** feature uses machine learning to fill these gaps, producing continuous monthly estimates for every well in an aquifer.
+Groundwater monitoring records often have gaps — wells may be measured infrequently, monitoring may start and stop, or sensors may fail. Aquifer Analyst's **Impute Data** feature uses machine learning to fill these gaps, producing continuous monthly estimates for every well in an aquifer.
 
 ## Overview
 

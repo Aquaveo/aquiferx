@@ -1,6 +1,6 @@
 # Overview of the App
 
-AquiferX is a single-page web application built with React and TypeScript. It runs entirely in the browser with a lightweight Vite development server that also provides file-based API endpoints for reading and writing data. There is no separate backend database — all data is stored as files on disk.
+Aquifer Analyst is a single-page web application built with React and TypeScript. It runs entirely in the browser with a lightweight Vite development server that also provides file-based API endpoints for reading and writing data. There is no separate backend database — all data is stored as files on disk.
 
 ## Interface Layout
 
@@ -38,7 +38,7 @@ The application is organized into four main areas:
 
 ## Data Hierarchy
 
-AquiferX organizes data in a four-level hierarchy:
+Aquifer Analyst organizes data in a four-level hierarchy:
 
 ```
 Region
@@ -56,7 +56,7 @@ Region
 
 ## Data Types
 
-Every measurement in AquiferX belongs to a **data type**. The app ships with one built-in type:
+Every measurement in Aquifer Analyst belongs to a **data type**. The app ships with one built-in type:
 
 | Code | Name | Description |
 |------|------|-------------|
@@ -99,7 +99,7 @@ When creating a region, you choose between:
 
 ## Coordinate Reference Systems
 
-AquiferX works in WGS 84 (EPSG:4326) — standard latitude/longitude coordinates. When you upload spatial data in a different coordinate reference system, the app automatically detects and reprojects:
+Aquifer Analyst works in WGS 84 (EPSG:4326) — standard latitude/longitude coordinates. When you upload spatial data in a different coordinate reference system, the app automatically detects and reprojects:
 
 - **GeoJSON** — CRS detected from the `crs` property in the file.
 - **Shapefiles** — CRS detected from the `.prj` file included in the ZIP archive.

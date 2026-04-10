@@ -1,4 +1,4 @@
-# AquiferX
+# Aquifer Analyst
 
 ## Project Overview
 - React 19 + TypeScript 5.8 + Vite 6 groundwater data visualization app

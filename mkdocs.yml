@@ -1,5 +1,5 @@
-site_name: AquiferX
-site_description: Documentation for the AquiferX Groundwater Data Visualization App
+site_name: Aquifer Analyst
+site_description: Documentation for the Aquifer Analyst Groundwater Data Visualization App
 site_author: Norm Jones
 copyright: Copyright &copy; 2025 Norman L. Jones
 extra_javascript:

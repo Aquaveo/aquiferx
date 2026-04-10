@@ -1,6 +1,6 @@
 # Trend Analysis
 
-Trend analysis in AquiferX computes linear regression slopes for well measurements and visualizes the results on the map with color-coded markers. This gives you a quick overview of which areas are experiencing rising, declining, or stable water levels.
+Trend analysis in Aquifer Analyst computes linear regression slopes for well measurements and visualizes the results on the map with color-coded markers. This gives you a quick overview of which areas are experiencing rising, declining, or stable water levels.
 
 ## Activating Trend Analysis
 

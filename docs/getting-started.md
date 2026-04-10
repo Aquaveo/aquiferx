@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide covers everything you need to install AquiferX and begin working with groundwater data.
+This guide covers everything you need to install Aquifer Analyst and begin working with groundwater data.
 
 ## System Requirements
 
@@ -37,7 +37,7 @@ After installing, verify Git is available by running:
 
 ### Installing Node.js
 
-AquiferX requires Node.js 18 or later. If you don't have it installed, follow the instructions for your operating system:
+Aquifer Analyst requires Node.js 18 or later. If you don't have it installed, follow the instructions for your operating system:
 
 === "Windows"
 

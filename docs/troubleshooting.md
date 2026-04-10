@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This page addresses common issues you may encounter when using AquiferX.
+This page addresses common issues you may encounter when using Aquifer Analyst.
 
 ## CRS and Coordinate Issues
 

@@ -2,7 +2,7 @@
 
 ## Background
 
-AquiferX already downloads **groundwater levels** from the USGS via the OGC API (`api.waterdata.usgs.gov/ogcapi/v0`), using parameter code `72019` (depth to water below land surface). The existing integration includes well discovery by bounding box, batched CQL2 POST measurement queries, retry/rate-limit handling, and data validation.
+Aquifer Analyst already downloads **groundwater levels** from the USGS via the OGC API (`api.waterdata.usgs.gov/ogcapi/v0`), using parameter code `72019` (depth to water below land surface). The existing integration includes well discovery by bounding box, batched CQL2 POST measurement queries, retry/rate-limit handling, and data validation.
 
 This plan explores extending the app to also download **water quality** data at wells.
 
@@ -371,7 +371,7 @@ The user picks **specific characteristics** (e.g. "Nitrate", "pH", "Arsenic"), n
   ...
 ```
 
-### 2. How does it map to AquiferX data types?
+### 2. How does it map to Aquifer Analyst data types?
 Each characteristic (e.g. Nitrate, Arsenic, pH) becomes its own `DataType` in the region's `dataTypes` array, with its own `data_{code}.csv` file. The catalog provides the code/name/unit mapping automatically.
 - Nitrate → `data_nitrate.csv`
 - Arsenic → `data_arsenic.csv`

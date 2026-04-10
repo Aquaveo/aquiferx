@@ -1,6 +1,6 @@
 # Spatial Analysis
 
-Spatial analysis in AquiferX transforms point-based well measurements into continuous raster surfaces that cover an entire aquifer. This enables you to visualize spatial patterns, animate changes over time, compute storage volumes, and draw cross-section profiles.
+Spatial analysis in Aquifer Analyst transforms point-based well measurements into continuous raster surfaces that cover an entire aquifer. This enables you to visualize spatial patterns, animate changes over time, compute storage volumes, and draw cross-section profiles.
 
 <!-- screenshot: Raster overlay on map showing interpolated water table surface -->
 

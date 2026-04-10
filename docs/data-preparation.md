@@ -1,12 +1,12 @@
 # Preparing Data
 
-Before importing data into AquiferX, your files need to be in the correct format. This page covers the supported file types, required columns, and common formatting considerations.
+Before importing data into Aquifer Analyst, your files need to be in the correct format. This page covers the supported file types, required columns, and common formatting considerations.
 
 ## Supported File Formats
 
 ### CSV Files
 
-AquiferX accepts **comma-separated** and **tab-separated** CSV files. The delimiter is auto-detected during import.
+Aquifer Analyst accepts **comma-separated** and **tab-separated** CSV files. The delimiter is auto-detected during import.
 
 - Files must include a header row with column names.
 - Column names are case-insensitive during mapping (e.g., `Well_ID` and `well_id` are treated the same).
@@ -111,7 +111,7 @@ For single-unit regions, the aquifer boundary is automatically generated from th
 
 ## Date Formats
 
-AquiferX auto-detects dates in the following formats:
+Aquifer Analyst auto-detects dates in the following formats:
 
 | Format | Example |
 |--------|---------|
@@ -130,7 +130,7 @@ If auto-detection picks the wrong format, you can manually select the correct fo
 
 ## Coordinate Reference Systems
 
-All spatial data in AquiferX is stored in **WGS 84 (EPSG:4326)** — standard latitude and longitude. If your data uses a different CRS:
+All spatial data in Aquifer Analyst is stored in **WGS 84 (EPSG:4326)** — standard latitude and longitude. If your data uses a different CRS:
 
 - **GeoJSON**: Include the `crs` property in the file. The app will detect and reproject automatically.
 - **Shapefiles**: Include the `.prj` file in your ZIP archive. The app reads the projection definition and reprojects using the proj4 library.

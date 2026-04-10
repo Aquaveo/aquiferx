@@ -1,6 +1,6 @@
 # Managing Data
 
-All data import, export, and deletion in AquiferX flows through the **Import Data Hub** — a central dialog accessed by clicking the **Manage Data** button in the toolbar.
+All data import, export, and deletion in Aquifer Analyst flows through the **Import Data Hub** — a central dialog accessed by clicking the **Manage Data** button in the toolbar.
 
 <!-- screenshot: Import Data Hub showing region list and action buttons -->
 
