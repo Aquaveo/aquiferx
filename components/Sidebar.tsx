@@ -14,7 +14,7 @@ interface SidebarProps {
   onToggleRegionVisibility: (id: string) => void;
   onEditRegion: (id: string, newName: string, lengthUnit: 'ft' | 'm') => void;
   onDownloadRegion: (id: string) => void;
-  onDeleteRegion: (id: string) => void;
+  onDeleteRegion: (id: string) => void | Promise<void>;
   onRenameAquifer: (id: string, newName: string) => void;
   onDeleteAquifer: (id: string) => void;
   rasterMeta: RasterAnalysisMeta[];
@@ -87,6 +87,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
 
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [expandedRegionIds, setExpandedRegionIds] = useState<Set<string>>(new Set());
   const [expandedAquiferIds, setExpandedAquiferIds] = useState<Set<string>>(new Set());
   const [lastActiveRasterByAquifer, setLastActiveRasterByAquifer] = useState<Map<string, string>>(new Map());
@@ -907,26 +908,44 @@ const Sidebar: React.FC<SidebarProps> = ({
     const itemKey = `region-${r.id}`;
     const isFocused = focusedItemKey === itemKey;
 
-    if (isConfirming) {
+    const isDeletingThis = deletingKey === `region-${r.id}`;
+    if (isConfirming || isDeletingThis) {
       return (
         <div key={r.id} data-item-key={itemKey}>
           <div className="px-2 py-1">
             <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs">
-              <p className="text-red-700 font-medium mb-2">Delete "{r.name}" and all its data?</p>
-              <div className="flex space-x-2">
-                <button
-                  onClick={() => { onDeleteRegion(r.id); setConfirmDelete(null); }}
-                  className="px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700"
-                >
-                  Yes, delete
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(null)}
-                  className="px-3 py-1 bg-white text-slate-600 rounded text-xs font-medium border border-slate-200 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-              </div>
+              {isDeletingThis ? (
+                <p className="text-red-700 font-medium flex items-center gap-2">
+                  <Loader2 size={12} className="animate-spin" />
+                  Deleting "{r.name}"…
+                </p>
+              ) : (
+                <>
+                  <p className="text-red-700 font-medium mb-2">Delete "{r.name}" and all its data?</p>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={async () => {
+                        setDeletingKey(`region-${r.id}`);
+                        setConfirmDelete(null);
+                        try {
+                          await onDeleteRegion(r.id);
+                        } finally {
+                          setDeletingKey(null);
+                        }
+                      }}
+                      className="px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700"
+                    >
+                      Yes, delete
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(null)}
+                      className="px-3 py-1 bg-white text-slate-600 rounded text-xs font-medium border border-slate-200 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

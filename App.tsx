@@ -856,6 +856,20 @@ const App: React.FC = () => {
   };
 
   const handleDeleteRegion = async (regionId: string) => {
+    // Delete folder on disk first — keep the row mounted so the sidebar can
+    // show its deleting spinner until the backend confirms completion.
+    try {
+      const res = await fetch('/api/delete-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: regionId }),
+      });
+      if (!res.ok) throw new Error(`delete-folder failed: ${res.status}`);
+    } catch (err) {
+      console.error('Failed to delete region folder:', err);
+      alert(`Failed to delete region. ${err instanceof Error ? err.message : ''}`);
+      return;
+    }
     // Clear selection if needed
     if (selectedRegion?.id === regionId) {
       setSelectedRegion(null);
@@ -863,19 +877,11 @@ const App: React.FC = () => {
       setSelectedWells([]);
     }
     // Remove from state
+    const deletedWellIds = new Set(wells.filter(w => w.regionId === regionId).map(w => `${w.regionId}:${w.aquiferId}:${w.id}`));
     setRegions(prev => prev.filter(r => r.id !== regionId));
     setAquifers(prev => prev.filter(a => a.regionId !== regionId));
     setWells(prev => prev.filter(w => w.regionId !== regionId));
-    setMeasurements(prev => prev.filter(m => {
-      const well = wells.find(w => w.id === m.wellId && w.regionId === m.regionId && w.aquiferId === m.aquiferId);
-      return !well || well.regionId !== regionId;
-    }));
-    // Delete folder on disk
-    await fetch('/api/delete-folder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folder: regionId }),
-    });
+    setMeasurements(prev => prev.filter(m => !deletedWellIds.has(`${m.regionId}:${m.aquiferId}:${m.wellId}`)));
   };
 
   const handleDownloadRegion = async (regionId: string) => {
