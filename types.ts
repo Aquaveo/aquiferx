@@ -5,6 +5,22 @@ export interface DataType {
   unit: string;
 }
 
+export interface CatalogParameter {
+  name: string;
+  unit: string;
+  group: string;
+  mcl: number | null;
+  who: number | null;
+  wqp?: {
+    characteristicName: string;
+    sampleFraction: string | null;
+  };
+}
+
+export interface ParameterCatalog {
+  parameters: Record<string, CatalogParameter>;
+}
+
 export interface RegionMeta {
   id: string;
   name: string;

@@ -1,0 +1,422 @@
+{
+  "parameters": {
+    "ph": {
+      "name": "pH",
+      "unit": "",
+      "group": "Physical",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "pH",
+        "sampleFraction": null
+      }
+    },
+    "temperature": {
+      "name": "Temperature",
+      "unit": "deg C",
+      "group": "Physical",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Temperature, water",
+        "sampleFraction": null
+      }
+    },
+    "conductivity": {
+      "name": "Specific Conductance",
+      "unit": "uS/cm",
+      "group": "Physical",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Specific conductance",
+        "sampleFraction": null
+      }
+    },
+    "turbidity": {
+      "name": "Turbidity",
+      "unit": "NTU",
+      "group": "Physical",
+      "mcl": null,
+      "who": 5,
+      "wqp": {
+        "characteristicName": "Turbidity",
+        "sampleFraction": null
+      }
+    },
+    "tds": {
+      "name": "Total Dissolved Solids",
+      "unit": "mg/L",
+      "group": "Physical",
+      "mcl": 500,
+      "who": 1000,
+      "wqp": {
+        "characteristicName": "Total dissolved solids",
+        "sampleFraction": null
+      }
+    },
+    "hardness": {
+      "name": "Hardness",
+      "unit": "mg/L",
+      "group": "Physical",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Hardness, Ca, Mg",
+        "sampleFraction": null
+      }
+    },
+    "nitrate": {
+      "name": "Nitrate",
+      "unit": "mg/L",
+      "group": "Nutrient",
+      "mcl": 10,
+      "who": 50,
+      "wqp": {
+        "characteristicName": "Nitrate",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "nitrite": {
+      "name": "Nitrite",
+      "unit": "mg/L",
+      "group": "Nutrient",
+      "mcl": 1,
+      "who": 3,
+      "wqp": {
+        "characteristicName": "Nitrite",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "ammonia": {
+      "name": "Ammonia",
+      "unit": "mg/L",
+      "group": "Nutrient",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Ammonia",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "phosphorus": {
+      "name": "Phosphorus",
+      "unit": "mg/L",
+      "group": "Nutrient",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Phosphorus",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "total_nitrogen": {
+      "name": "Total Nitrogen",
+      "unit": "mg/L",
+      "group": "Nutrient",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Total Nitrogen, mixed forms",
+        "sampleFraction": "Unfiltered"
+      }
+    },
+    "total_phosphorus": {
+      "name": "Total Phosphorus",
+      "unit": "mg/L",
+      "group": "Nutrient",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Total Phosphorus, mixed forms",
+        "sampleFraction": "Unfiltered"
+      }
+    },
+    "calcium": {
+      "name": "Calcium",
+      "unit": "mg/L",
+      "group": "Major Ions",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Calcium",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "magnesium": {
+      "name": "Magnesium",
+      "unit": "mg/L",
+      "group": "Major Ions",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Magnesium",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "sodium": {
+      "name": "Sodium",
+      "unit": "mg/L",
+      "group": "Major Ions",
+      "mcl": null,
+      "who": 200,
+      "wqp": {
+        "characteristicName": "Sodium",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "potassium": {
+      "name": "Potassium",
+      "unit": "mg/L",
+      "group": "Major Ions",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Potassium",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "chloride": {
+      "name": "Chloride",
+      "unit": "mg/L",
+      "group": "Major Ions",
+      "mcl": 250,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Chloride",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "sulfate": {
+      "name": "Sulfate",
+      "unit": "mg/L",
+      "group": "Major Ions",
+      "mcl": 250,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Sulfate",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "bicarbonate": {
+      "name": "Bicarbonate",
+      "unit": "mg/L",
+      "group": "Major Ions",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Bicarbonate",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "carbonate": {
+      "name": "Carbonate",
+      "unit": "mg/L",
+      "group": "Major Ions",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Carbonate",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "arsenic": {
+      "name": "Arsenic",
+      "unit": "ug/L",
+      "group": "Minor Metals",
+      "mcl": 10,
+      "who": 10,
+      "wqp": {
+        "characteristicName": "Arsenic",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "iron": {
+      "name": "Iron",
+      "unit": "ug/L",
+      "group": "Minor Metals",
+      "mcl": 300,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Iron",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "manganese": {
+      "name": "Manganese",
+      "unit": "ug/L",
+      "group": "Minor Metals",
+      "mcl": 50,
+      "who": 400,
+      "wqp": {
+        "characteristicName": "Manganese",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "lead": {
+      "name": "Lead",
+      "unit": "ug/L",
+      "group": "Minor Metals",
+      "mcl": 15,
+      "who": 10,
+      "wqp": {
+        "characteristicName": "Lead",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "copper": {
+      "name": "Copper",
+      "unit": "ug/L",
+      "group": "Minor Metals",
+      "mcl": 1300,
+      "who": 2000,
+      "wqp": {
+        "characteristicName": "Copper",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "zinc": {
+      "name": "Zinc",
+      "unit": "ug/L",
+      "group": "Minor Metals",
+      "mcl": 5000,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Zinc",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "chromium": {
+      "name": "Chromium",
+      "unit": "ug/L",
+      "group": "Minor Metals",
+      "mcl": 100,
+      "who": 50,
+      "wqp": {
+        "characteristicName": "Chromium",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "selenium": {
+      "name": "Selenium",
+      "unit": "ug/L",
+      "group": "Minor Metals",
+      "mcl": 50,
+      "who": 40,
+      "wqp": {
+        "characteristicName": "Selenium",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "fluoride": {
+      "name": "Fluoride",
+      "unit": "mg/L",
+      "group": "Minor Non-metals",
+      "mcl": 4,
+      "who": 1.5,
+      "wqp": {
+        "characteristicName": "Fluoride",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "boron": {
+      "name": "Boron",
+      "unit": "ug/L",
+      "group": "Minor Non-metals",
+      "mcl": null,
+      "who": 2400,
+      "wqp": {
+        "characteristicName": "Boron",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "silica": {
+      "name": "Silica",
+      "unit": "mg/L",
+      "group": "Minor Non-metals",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Silica",
+        "sampleFraction": "Filtered"
+      }
+    },
+    "e_coli": {
+      "name": "E. coli",
+      "unit": "CFU/100mL",
+      "group": "Microbiological",
+      "mcl": 0,
+      "who": 0,
+      "wqp": {
+        "characteristicName": "Escherichia coli",
+        "sampleFraction": null
+      }
+    },
+    "fecal_coliform": {
+      "name": "Fecal Coliform",
+      "unit": "CFU/100mL",
+      "group": "Microbiological",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Fecal Coliform",
+        "sampleFraction": null
+      }
+    },
+    "total_coliform": {
+      "name": "Total Coliform",
+      "unit": "CFU/100mL",
+      "group": "Microbiological",
+      "mcl": null,
+      "who": 0,
+      "wqp": {
+        "characteristicName": "Total Coliform",
+        "sampleFraction": null
+      }
+    },
+    "dissolved_oxygen": {
+      "name": "Dissolved Oxygen",
+      "unit": "mg/L",
+      "group": "Other",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Dissolved oxygen (DO)",
+        "sampleFraction": null
+      }
+    },
+    "alkalinity": {
+      "name": "Alkalinity",
+      "unit": "mg/L",
+      "group": "Other",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Alkalinity, total",
+        "sampleFraction": null
+      }
+    },
+    "bod": {
+      "name": "Biochemical Oxygen Demand",
+      "unit": "mg/L",
+      "group": "Other",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Biochemical oxygen demand, standard conditions",
+        "sampleFraction": null
+      }
+    },
+    "cod": {
+      "name": "Chemical Oxygen Demand",
+      "unit": "mg/L",
+      "group": "Other",
+      "mcl": null,
+      "who": null,
+      "wqp": {
+        "characteristicName": "Chemical oxygen demand",
+        "sampleFraction": null
+      }
+    }
+  }
+}

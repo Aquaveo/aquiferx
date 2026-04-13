@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { X, Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
-import { DataType, RegionMeta } from '../../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { X, Plus, Pencil, Trash2, Loader2, ChevronRight, ChevronDown, Check } from 'lucide-react';
+import { DataType, RegionMeta, ParameterCatalog, CatalogParameter } from '../../types';
 import { saveFiles, deleteFile } from '../../services/importUtils';
+import { loadCatalog, groupCatalog, catalogToDataType } from '../../services/catalog';
 import ConfirmDialog from './ConfirmDialog';
 
 interface DataTypeEditorProps {
@@ -22,15 +23,17 @@ function isValidCode(code: string): boolean {
   return /^[a-z0-9_]{1,20}$/.test(code);
 }
 
+type AddMode = null | 'catalog' | 'custom';
+
 const DataTypeEditor: React.FC<DataTypeEditorProps> = ({
   regionId, regionName, lengthUnit, dataTypes, singleUnit, onUpdate, onClose
 }) => {
   const [types, setTypes] = useState<DataType[]>(dataTypes);
-  const [showAdd, setShowAdd] = useState(false);
+  const [addMode, setAddMode] = useState<AddMode>(null);
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [deleteCode, setDeleteCode] = useState<string | null>(null);
 
-  // Add form
+  // Custom add form
   const [newName, setNewName] = useState('');
   const [newCode, setNewCode] = useState('');
   const [newUnit, setNewUnit] = useState(lengthUnit);
@@ -40,34 +43,53 @@ const DataTypeEditor: React.FC<DataTypeEditorProps> = ({
   const [editName, setEditName] = useState('');
   const [editUnit, setEditUnit] = useState('');
 
-  // Cross-region suggestions
+  // Catalog
+  const [catalog, setCatalog] = useState<ParameterCatalog | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  // Cross-region suggestions (non-catalog only)
   const [suggestions, setSuggestions] = useState<DataType[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    // Fetch suggestions from other regions
+    loadCatalog().then(setCatalog).catch(() => setCatalog({ parameters: {} }));
+  }, []);
+
+  useEffect(() => {
     const fetchSuggestions = async () => {
       try {
         const res = await fetch('/api/regions');
         if (!res.ok) return;
         const allRegions: RegionMeta[] = await res.json();
         const existing = new Set(types.map(t => t.code));
+        const catalogCodes = new Set(Object.keys(catalog?.parameters || {}));
         const seen = new Set<string>();
         const sugs: DataType[] = [];
         for (const r of allRegions) {
           if (r.id === regionId) continue;
           for (const dt of r.dataTypes || []) {
-            if (!existing.has(dt.code) && !seen.has(dt.code) && dt.code !== 'wte') {
-              seen.add(dt.code);
-              sugs.push(dt);
-            }
+            if (existing.has(dt.code) || seen.has(dt.code) || dt.code === 'wte') continue;
+            if (catalogCodes.has(dt.code)) continue; // prefer catalog for those
+            seen.add(dt.code);
+            sugs.push(dt);
           }
         }
         setSuggestions(sugs);
       } catch {}
     };
     fetchSuggestions();
-  }, [types, regionId]);
+  }, [types, regionId, catalog]);
+
+  const grouped = useMemo(() => (catalog ? groupCatalog(catalog) : {}), [catalog]);
+  const existingCodes = useMemo(() => new Set(types.map(t => t.code)), [types]);
+
+  const toggleGroup = (g: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(g)) next.delete(g); else next.add(g);
+      return next;
+    });
+  };
 
   const validateCode = (code: string) => {
     if (!isValidCode(code)) { setCodeError('Must be lowercase alphanumeric + underscore, max 20 chars'); return false; }
@@ -86,14 +108,19 @@ const DataTypeEditor: React.FC<DataTypeEditorProps> = ({
     setIsSaving(false);
   };
 
-  const handleAdd = async () => {
+  const handleAddCustom = async () => {
     if (!newName.trim() || !validateCode(newCode)) return;
     const dt: DataType = { code: newCode, name: newName.trim(), unit: newUnit };
     await persistTypes([...types, dt]);
-    setShowAdd(false);
+    setAddMode(null);
     setNewName('');
     setNewCode('');
     setNewUnit(lengthUnit);
+  };
+
+  const handleAddCatalogEntry = async (code: string, param: CatalogParameter) => {
+    if (existingCodes.has(code)) return;
+    await persistTypes([...types, catalogToDataType(code, param)]);
   };
 
   const handleAddSuggestion = async (dt: DataType) => {
@@ -124,7 +151,7 @@ const DataTypeEditor: React.FC<DataTypeEditorProps> = ({
     setDeleteCode(null);
   };
 
-  // Count records per type (from measurementCounts would need async, skip for now)
+  const groupNames = Object.keys(grouped).sort();
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40" onClick={onClose}>
@@ -188,8 +215,92 @@ const DataTypeEditor: React.FC<DataTypeEditorProps> = ({
           </tbody>
         </table>
 
-        {/* Add form */}
-        {showAdd ? (
+        {/* Add section */}
+        {addMode === null && (
+          <div className="mb-4">
+            <div className="flex gap-2 mb-3">
+              <button onClick={() => setAddMode('catalog')}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-800 font-medium">
+                <Plus size={14} /> Add from Catalog
+              </button>
+              <button onClick={() => setAddMode('custom')}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800 font-medium">
+                <Plus size={14} /> Custom Type
+              </button>
+            </div>
+
+            {suggestions.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-2">Custom types from other regions:</p>
+                <div className="flex flex-wrap gap-2">
+                  {suggestions.map(dt => (
+                    <button key={dt.code} onClick={() => handleAddSuggestion(dt)}
+                      className="px-2 py-1 bg-slate-100 text-slate-700 rounded-full text-xs hover:bg-blue-50 hover:text-blue-700 transition-colors">
+                      + {dt.name} ({dt.unit})
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Catalog browse */}
+        {addMode === 'catalog' && (
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg mb-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-medium text-slate-700">Add from Parameter Catalog</p>
+              <button onClick={() => setAddMode(null)} className="text-xs text-slate-500 hover:text-slate-700">Close</button>
+            </div>
+            {!catalog ? (
+              <div className="flex items-center gap-2 text-sm text-slate-500 py-4"><Loader2 size={14} className="animate-spin" /> Loading catalog…</div>
+            ) : groupNames.length === 0 ? (
+              <p className="text-sm text-slate-500 py-2">Catalog is empty.</p>
+            ) : (
+              <div className="space-y-1 max-h-80 overflow-y-auto">
+                {groupNames.map(group => {
+                  const entries = grouped[group];
+                  const expanded = expandedGroups.has(group);
+                  return (
+                    <div key={group} className="border border-slate-200 rounded-lg bg-white">
+                      <button onClick={() => toggleGroup(group)}
+                        className="w-full flex items-center justify-between px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50">
+                        <span className="flex items-center gap-1">
+                          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                          {group}
+                        </span>
+                        <span className="text-xs text-slate-400">{entries.length}</span>
+                      </button>
+                      {expanded && (
+                        <div className="border-t border-slate-100">
+                          {entries.map(({ code, param }) => {
+                            const already = existingCodes.has(code);
+                            return (
+                              <button key={code} disabled={already || isSaving}
+                                onClick={() => handleAddCatalogEntry(code, param)}
+                                className={`w-full flex items-center justify-between px-3 py-1.5 text-left text-sm border-t border-slate-50 first:border-t-0 ${
+                                  already ? 'bg-slate-50 text-slate-400 cursor-default' : 'hover:bg-blue-50 text-slate-700'
+                                }`}>
+                                <span className="flex items-center gap-2">
+                                  {already ? <Check size={12} className="text-slate-400" /> : <Plus size={12} className="text-blue-500" />}
+                                  {param.name}
+                                </span>
+                                <span className="text-xs text-slate-400">{param.unit || '—'}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Custom add form */}
+        {addMode === 'custom' && (
           <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg mb-4">
             <div className="space-y-3">
               <div>
@@ -209,32 +320,12 @@ const DataTypeEditor: React.FC<DataTypeEditorProps> = ({
                   placeholder="e.g., ppm" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
               </div>
               <div className="flex gap-2 justify-end">
-                <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-sm text-slate-600">Cancel</button>
-                <button onClick={handleAdd} disabled={!newName.trim() || !newCode || !!codeError || isSaving}
+                <button onClick={() => setAddMode(null)} className="px-3 py-1.5 text-sm text-slate-600">Cancel</button>
+                <button onClick={handleAddCustom} disabled={!newName.trim() || !newCode || !!codeError || isSaving}
                   className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
                   {isSaving && <Loader2 size={12} className="animate-spin" />} Add
                 </button>
               </div>
-            </div>
-          </div>
-        ) : (
-          <button onClick={() => setShowAdd(true)}
-            className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-800 font-medium mb-4">
-            <Plus size={14} /> Add Data Type
-          </button>
-        )}
-
-        {/* Cross-region suggestions */}
-        {suggestions.length > 0 && !showAdd && (
-          <div className="mb-4">
-            <p className="text-xs font-medium text-slate-500 mb-2">Types from other regions:</p>
-            <div className="flex flex-wrap gap-2">
-              {suggestions.map(dt => (
-                <button key={dt.code} onClick={() => handleAddSuggestion(dt)}
-                  className="px-2 py-1 bg-slate-100 text-slate-700 rounded-full text-xs hover:bg-blue-50 hover:text-blue-700 transition-colors">
-                  + {dt.name} ({dt.unit})
-                </button>
-              ))}
             </div>
           </div>
         )}
@@ -244,7 +335,6 @@ const DataTypeEditor: React.FC<DataTypeEditorProps> = ({
         </div>
       </div>
 
-      {/* Delete confirmation */}
       {deleteCode && (
         <ConfirmDialog
           title="Delete Data Type"
