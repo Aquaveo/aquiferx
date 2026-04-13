@@ -202,13 +202,19 @@ export function autoMapColumns(columns: string[], fileType: string): ColumnMappi
     if (aqIdIdx >= 0) mapping['aquifer_id'] = columns[aqIdIdx];
   } else if (fileType === 'measurements') {
     const wellIdIdx = lowerColumns.findIndex(c => c.includes('well') && c.includes('id') || c === 'well_id');
+    const wellNameIdx = lowerColumns.findIndex(c => (c.includes('well') && c.includes('name')) || c === 'well_name' || c === 'name' || c === 'station' || c === 'station_name');
     const dateIdx = lowerColumns.findIndex(c => c === 'date' || c.includes('date'));
     const valueIdx = lowerColumns.findIndex(c => c === 'value' || c === 'wte' || c.includes('elevation') || c.includes('level'));
+    const latIdx = lowerColumns.findIndex(c => c === 'lat' || c.includes('latitude') || c === 'lat_dec');
+    const longIdx = lowerColumns.findIndex(c => c === 'long' || c === 'lng' || c.includes('longitude') || c === 'long_dec' || c === 'lon');
     const aqIdIdx = lowerColumns.findIndex(c => c.includes('aquifer') && c.includes('id') || c === 'aquifer_id');
 
     if (wellIdIdx >= 0) mapping['well_id'] = columns[wellIdIdx];
+    if (wellNameIdx >= 0) mapping['well_name'] = columns[wellNameIdx];
     if (dateIdx >= 0) mapping['date'] = columns[dateIdx];
     if (valueIdx >= 0) mapping['value'] = columns[valueIdx];
+    if (latIdx >= 0) mapping['lat'] = columns[latIdx];
+    if (longIdx >= 0) mapping['long'] = columns[longIdx];
     if (aqIdIdx >= 0) mapping['aquifer_id'] = columns[aqIdIdx];
   }
 

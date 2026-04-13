@@ -538,20 +538,18 @@ The existing `isInUS()` check (already used in WellImporter) gates visibility of
 - Smart well discovery (section 5) when CSV contains well lat/lon columns
 - Otherwise unchanged
 
-### 7. Single well set with data-type-aware map filtering — DECIDED
+### 7. Single well set with data-type-aware map display — ALREADY COVERED
 
 Keep **one `wells.csv`** per region. Do not split into separate water-level and water-quality well sets.
 
-**Rationale:** A well is a physical location. Whether you measure water level or nitrate there, it's the same well. Splitting into two files creates duplication (wells with both WL and WQ data), sync headaches, and doubles the import/management complexity. The underlying concern — map clutter when viewing a data type that only applies to a subset of wells — is a display problem, not a data model problem.
+**Rationale:** A well is a physical location. Whether you measure water level or nitrate there, it's the same well. Splitting into two files creates duplication (wells with both WL and WQ data), sync headaches, and doubles the import/management complexity.
 
-**Solution:** Filter the map display by the active data type. When viewing nitrate, only show wells that appear in `data_nitrate.csv`. When viewing water levels, only show wells in `data_wte.csv`. The data to do this already exists — each `data_{code}.csv` has a `well_id` column.
+**Map display concern is already handled by existing features:**
+- Well markers are colored per-data-type: blue (2+ observations), gray (1 observation), red ("No data" for the active type). The legend already shows this.
+- The "Min obs" filter in the map overlay lets the user hide wells below a threshold, which effectively hides "No data" and 1-observation wells when set to 2+.
+- Hiding all non-matching wells wholesale (the original Phase 2 plan) actually removes a useful capability: seeing the full aquifer context so the user knows where data is and isn't.
 
-This requires changes to:
-- **Map rendering**: Filter well markers by active data type's well IDs
-- **Sidebar well list** (if applicable): Same filter
-- **Well count display**: Could show "X of Y wells" to indicate filtering
-
-This is a separate, smaller piece of work that can be done independently of the USGS WQ download feature, but should be in place before users start mixing large WL and WQ well sets in the same region.
+No code changes needed for Phase 2 — the color-coded markers plus Min obs filter already provide the right balance between full-aquifer visibility and per-data-type focus.
 
 ### 8. Download safeguards and date range filtering
 
@@ -659,7 +657,7 @@ This strategy is the default for Phase 4. Will validate against real WQP respons
 | **DataTypeEditor redesign** (catalog browse) | All regions | One-click data type creation from catalog for Jamaica, Jordan, etc. |
 | **Smart well discovery** (matching + auto-add) | All regions | Any CSV import with lat/lon benefits, regardless of country |
 | **Proximity-based well matching** | All regions | Solves the Jamaica-style name mismatch problem everywhere |
-| **Data-type-aware map filtering** | All regions | Show only relevant wells for the active data type |
+| **Data-type-aware map display** | All regions | Already covered by existing per-data-type well color legend and Min obs filter |
 | **Water quality download (WQP)** | US only | Download tab gated by `isInUS()` |
 | **Water level download (USGS OGC)** | US only | Already gated by `isInUS()` (no change) |
 
@@ -674,9 +672,8 @@ The catalog + DataTypeEditor + smart well discovery are **standalone deliverable
 - Redesign DataTypeEditor: catalog browse as primary, cross-region suggestions for custom types, manual as fallback
 - No API integration yet — just better data type management
 
-**Phase 2: Data-type-aware map filtering** (all regions)
-- Filter map markers and sidebar by which wells have data for the active data type
-- Independent of WQ download, but needed before mixing large WL + WQ well sets
+**Phase 2: Data-type-aware map display** — already covered (see section 7)
+- Existing per-data-type well color legend (blue / gray / red "No data") and Min obs filter already provide the right behavior. No new code.
 
 **Phase 3: Smart well discovery** (all regions)
 - Well matching strategy (ID → name → proximity) in MeasurementImporter

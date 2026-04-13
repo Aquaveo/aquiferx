@@ -297,7 +297,10 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
 
   const dimAquifers = noRegion || isSingleUnit;
   const dimWells = noRegion || (!isSingleUnit && noAquifers);
-  const dimMeasurements = noRegion || noWells;
+  // Measurements card stays enabled even when wellCount === 0 — CSV imports
+  // with lat/lng can bootstrap the well set. Aquifers must still exist for
+  // multi-unit regions so measurements can be assigned.
+  const dimMeasurements = noRegion || (!isSingleUnit && noAquifers);
 
   const totalMeasurements = activeRegion
     ? Object.values(activeRegion.measurementCounts).reduce((a: number, b: number) => a + b, 0)
@@ -651,6 +654,7 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
         <MeasurementImporter
           regionId={activeRegion.id}
           regionName={activeRegion.name}
+          lengthUnit={activeRegion.lengthUnit}
           singleUnit={activeRegion.singleUnit}
           dataTypes={activeRegion.dataTypes}
           regionBounds={activeRegion.bounds}

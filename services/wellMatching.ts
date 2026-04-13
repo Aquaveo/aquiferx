@@ -1,0 +1,279 @@
+import { DataType, CatalogParameter, ParameterCatalog } from '../types';
+
+// -------- Normalization helpers --------
+
+export function normalizeName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+// Strip parenthesized unit hints like "Nitrate (mg/L)" → "nitrate" + unit "mg/L"
+export function parseColumnHeader(header: string): { base: string; unit: string | null } {
+  const m = header.match(/^(.*?)\s*[\(\[]\s*([^\)\]]+)\s*[\)\]]\s*$/);
+  if (m) return { base: m[1].trim(), unit: m[2].trim() };
+  return { base: header.trim(), unit: null };
+}
+
+// -------- Haversine distance (meters) --------
+
+export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// -------- aqx- ID generation --------
+
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24);
+}
+
+function fmtCoord(n: number): string {
+  return Math.abs(n).toFixed(2);
+}
+
+export function generateAqxId(name: string | null | undefined, lat: number, lng: number, taken: Set<string>): string {
+  const latTag = `${fmtCoord(lat)}${lat >= 0 ? 'N' : 'S'}`;
+  const lngTag = `${fmtCoord(lng)}${lng >= 0 ? 'E' : 'W'}`;
+  const base = name && name.trim() ? `aqx-${slugify(name)}-${latTag}${lngTag}` : `aqx-${latTag}${lngTag}`;
+  if (!taken.has(base)) return base;
+  for (let i = 2; i < 1000; i++) {
+    const cand = `${base}-${i}`;
+    if (!taken.has(cand)) return cand;
+  }
+  return `${base}-${Date.now()}`;
+}
+
+// -------- Well matching pipeline --------
+
+export interface ExistingWell {
+  well_id: string;
+  well_name: string;
+  lat: number;
+  lng: number;
+  aquifer_id: string;
+  gse: number;
+}
+
+export interface SourceWellRow {
+  sourceIndex: number;
+  wellId?: string;
+  wellName?: string;
+  lat?: number;
+  lng?: number;
+}
+
+export type MatchKind = 'id' | 'name' | 'proximity' | 'new' | 'unmatched';
+
+export interface MatchResult {
+  sourceRow: SourceWellRow;
+  kind: MatchKind;
+  existingWell?: ExistingWell;
+  distanceMeters?: number;
+  resolvedWellId: string | null; // null when unmatched
+  rejected?: boolean;
+}
+
+export interface MatchOptions {
+  proximityMeters: number;
+}
+
+export interface MatchSummary {
+  byId: number;
+  byName: number;
+  byProximity: number;
+  newWells: number;
+  unmatched: number;
+  total: number;
+}
+
+export function matchWells(rows: SourceWellRow[], existing: ExistingWell[], opts: MatchOptions): MatchResult[] {
+  const byId = new Map<string, ExistingWell>();
+  const byNormName = new Map<string, ExistingWell>();
+  for (const w of existing) {
+    if (w.well_id) byId.set(w.well_id, w);
+    if (w.well_name) byNormName.set(normalizeName(w.well_name), w);
+  }
+  const results: MatchResult[] = [];
+  for (const row of rows) {
+    // 1. Exact ID match
+    if (row.wellId && byId.has(row.wellId)) {
+      const ex = byId.get(row.wellId)!;
+      results.push({ sourceRow: row, kind: 'id', existingWell: ex, resolvedWellId: ex.well_id });
+      continue;
+    }
+    // 2. Exact name match
+    if (row.wellName) {
+      const ex = byNormName.get(normalizeName(row.wellName));
+      if (ex) {
+        results.push({ sourceRow: row, kind: 'name', existingWell: ex, resolvedWellId: ex.well_id });
+        continue;
+      }
+    }
+    // 3. Proximity match
+    if (row.lat !== undefined && row.lng !== undefined && !isNaN(row.lat) && !isNaN(row.lng)) {
+      let nearest: { well: ExistingWell; dist: number } | null = null;
+      for (const w of existing) {
+        if (isNaN(w.lat) || isNaN(w.lng)) continue;
+        const d = haversineMeters(row.lat, row.lng, w.lat, w.lng);
+        if (d <= opts.proximityMeters && (!nearest || d < nearest.dist)) {
+          nearest = { well: w, dist: d };
+        }
+      }
+      if (nearest) {
+        results.push({
+          sourceRow: row,
+          kind: 'proximity',
+          existingWell: nearest.well,
+          distanceMeters: nearest.dist,
+          resolvedWellId: nearest.well.well_id,
+        });
+        continue;
+      }
+      // 4. New well (has lat/lng but no match)
+      results.push({ sourceRow: row, kind: 'new', resolvedWellId: null });
+      continue;
+    }
+    // 5. Unmatched (no lat/lng and no id/name match)
+    results.push({ sourceRow: row, kind: 'unmatched', resolvedWellId: null });
+  }
+  return results;
+}
+
+export function summarizeMatches(results: MatchResult[]): MatchSummary {
+  const s: MatchSummary = { byId: 0, byName: 0, byProximity: 0, newWells: 0, unmatched: 0, total: results.length };
+  for (const r of results) {
+    if (r.rejected) { s.unmatched++; continue; }
+    switch (r.kind) {
+      case 'id': s.byId++; break;
+      case 'name': s.byName++; break;
+      case 'proximity': s.byProximity++; break;
+      case 'new': s.newWells++; break;
+      case 'unmatched': s.unmatched++; break;
+    }
+  }
+  return s;
+}
+
+// -------- Column → data type suggestion --------
+
+export type SuggestionSource = 'catalog' | 'existing' | 'otherRegion' | 'custom';
+
+export interface ColumnSuggestion {
+  column: string;
+  code: string;
+  name: string;
+  unit: string;
+  source: SuggestionSource;
+  include: boolean;
+}
+
+// Reserved column keys that shouldn't be suggested as data types
+const RESERVED_LOWER = new Set([
+  'well_id', 'wellid', 'well id', 'site', 'site_id', 'siteid',
+  'well_name', 'wellname', 'well name', 'name',
+  'date', 'datetime', 'timestamp', 'time',
+  'lat', 'latitude', 'lat_dec',
+  'long', 'lng', 'longitude', 'long_dec', 'lon',
+  'aquifer_id', 'aquifer', 'aquifer_name',
+  'gse', 'elevation', 'ground_surface_elevation', 'surface_elevation',
+]);
+
+function isReservedColumn(col: string): boolean {
+  return RESERVED_LOWER.has(col.toLowerCase().trim());
+}
+
+function buildCatalogIndex(catalog: ParameterCatalog): Map<string, { code: string; param: CatalogParameter }> {
+  const index = new Map<string, { code: string; param: CatalogParameter }>();
+  for (const [code, param] of Object.entries(catalog.parameters)) {
+    const keys = new Set<string>();
+    keys.add(normalizeName(code));
+    keys.add(normalizeName(param.name));
+    if (param.wqp?.characteristicName) keys.add(normalizeName(param.wqp.characteristicName));
+    for (const k of keys) {
+      if (k && !index.has(k)) index.set(k, { code, param });
+    }
+  }
+  return index;
+}
+
+function slugCode(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 20) || 'custom';
+}
+
+export function suggestDataTypesFromColumns(
+  columns: string[],
+  catalog: ParameterCatalog | null,
+  regionDataTypes: DataType[],
+  otherRegionDataTypes: DataType[]
+): ColumnSuggestion[] {
+  const catalogIdx = catalog ? buildCatalogIndex(catalog) : new Map();
+  const regionByName = new Map<string, DataType>();
+  for (const dt of regionDataTypes) {
+    regionByName.set(normalizeName(dt.name), dt);
+    regionByName.set(normalizeName(dt.code), dt);
+  }
+  const otherByName = new Map<string, DataType>();
+  for (const dt of otherRegionDataTypes) {
+    if (!otherByName.has(normalizeName(dt.name))) otherByName.set(normalizeName(dt.name), dt);
+    if (!otherByName.has(normalizeName(dt.code))) otherByName.set(normalizeName(dt.code), dt);
+  }
+
+  const suggestions: ColumnSuggestion[] = [];
+  for (const col of columns) {
+    if (isReservedColumn(col)) continue;
+    const { base, unit } = parseColumnHeader(col);
+    const norm = normalizeName(base);
+    if (!norm) continue;
+
+    // 1. Region's existing types (use as-is, preserves region overrides)
+    const regionHit = regionByName.get(norm);
+    if (regionHit) {
+      suggestions.push({ column: col, code: regionHit.code, name: regionHit.name, unit: regionHit.unit, source: 'existing', include: true });
+      continue;
+    }
+
+    // 2. Catalog (exact-normalized)
+    const catHit = catalogIdx.get(norm) || findSubstringCatalogMatch(norm, catalogIdx);
+    if (catHit) {
+      suggestions.push({
+        column: col,
+        code: catHit.code,
+        name: catHit.param.name,
+        unit: unit || catHit.param.unit,
+        source: 'catalog',
+        include: true,
+      });
+      continue;
+    }
+
+    // 3. Other regions' custom types
+    const otherHit = otherByName.get(norm);
+    if (otherHit) {
+      suggestions.push({ column: col, code: otherHit.code, name: otherHit.name, unit: unit || otherHit.unit, source: 'otherRegion', include: true });
+      continue;
+    }
+
+    // 4. Custom fallback
+    suggestions.push({
+      column: col,
+      code: slugCode(base),
+      name: base,
+      unit: unit || '',
+      source: 'custom',
+      include: false, // default off — user should opt in for unmatched columns
+    });
+  }
+  return suggestions;
+}
+
+function findSubstringCatalogMatch(norm: string, index: Map<string, { code: string; param: CatalogParameter }>) {
+  // Try partial: catalog key contained in norm, or norm contained in key
+  for (const [key, entry] of index) {
+    if (key.length < 3) continue;
+    if (norm.includes(key) || key.includes(norm)) return entry;
+  }
+  return null;
+}

@@ -1,14 +1,27 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload, Calendar } from 'lucide-react';
-import { processUploadedFile, UploadedFile, saveFiles, parseDate, detectDateFormat, parseCSV, isInUS, freshFetch } from '../../services/importUtils';
+import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload, Calendar, MapPin, Wand2 } from 'lucide-react';
+import { processUploadedFile, UploadedFile, saveFiles, parseDate, detectDateFormat, parseCSV, isInUS, freshFetch, assignWellToAquifer } from '../../services/importUtils';
 import { fetchUSGSMeasurements, validateUSGSMeasurements, USGSDataQualityReport, USGSMeasurement, USGSDataSpan, computeDataSpan, filterByDateRange, getUSGSApiKey, setUSGSApiKey } from '../../services/usgsApi';
+import { loadCatalog } from '../../services/catalog';
+import {
+  matchWells,
+  summarizeMatches,
+  generateAqxId,
+  suggestDataTypesFromColumns,
+  ExistingWell,
+  MatchResult,
+  MatchSummary,
+  ColumnSuggestion,
+} from '../../services/wellMatching';
+import { fetchGseBatch } from '../../services/gseLookup';
 import ColumnMapperModal from './ColumnMapperModal';
 import ConfirmDialog from './ConfirmDialog';
-import { DataType } from '../../types';
+import { DataType, ParameterCatalog, RegionMeta } from '../../types';
 
 interface MeasurementImporterProps {
   regionId: string;
   regionName: string;
+  lengthUnit: 'ft' | 'm';
   singleUnit: boolean;
   dataTypes: DataType[];
   regionBounds: [number, number, number, number];
@@ -23,7 +36,7 @@ type USGSMode = 'fresh' | 'quick-refresh' | 'full-refresh';
 type AquiferAssignment = 'from-wells' | 'single' | 'csv-field';
 
 const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
-  regionId, regionName, singleUnit, dataTypes, regionBounds, existingWellCount, onComplete, onClose
+  regionId, regionName, lengthUnit, singleUnit, dataTypes, regionBounds, existingWellCount, onComplete, onClose
 }) => {
   const [dataSource, setDataSource] = useState<DataSource>('upload');
   const [file, setFile] = useState<UploadedFile | null>(null);
@@ -83,6 +96,18 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   const [quickRefreshCutoff, setQuickRefreshCutoff] = useState('');
   const [rawUSGSMeasurements, setRawUSGSMeasurements] = useState<USGSMeasurement[]>([]);
 
+  // Phase 3: smart well discovery + column detection
+  const [existingWellsFull, setExistingWellsFull] = useState<ExistingWell[]>([]);
+  const [aquifersGeojson, setAquifersGeojson] = useState<any>(null);
+  const [catalog, setCatalog] = useState<ParameterCatalog | null>(null);
+  const [otherRegionTypes, setOtherRegionTypes] = useState<DataType[]>([]);
+  const [columnSuggestions, setColumnSuggestions] = useState<ColumnSuggestion[]>([]);
+  const [matchResults, setMatchResults] = useState<MatchResult[] | null>(null);
+  const [matchSummary, setMatchSummary] = useState<MatchSummary | null>(null);
+  const [proximityMeters, setProximityMeters] = useState(100);
+  const [isMatching, setIsMatching] = useState(false);
+  const [newWellsGseProgress, setNewWellsGseProgress] = useState({ done: 0, total: 0 });
+
   const regionOverlapsUS = isInUS(
     (regionBounds[0] + regionBounds[2]) / 2,
     (regionBounds[1] + regionBounds[3]) / 2
@@ -91,22 +116,24 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   // Load aquifer list and well->aquifer mapping
   useEffect(() => {
     (async () => {
-      // Load aquifers
-      if (!singleUnit) {
-        try {
-          const res = await freshFetch(`/data/${regionId}/aquifers.geojson`);
-          if (res.ok) {
-            const gj = await res.json();
+      // Load aquifers geojson (kept for point-in-polygon assignment of new wells,
+      // even for single-unit regions we may still have it for display)
+      try {
+        const res = await freshFetch(`/data/${regionId}/aquifers.geojson`);
+        if (res.ok) {
+          const gj = await res.json();
+          setAquifersGeojson(gj);
+          if (!singleUnit) {
             const features = gj.type === 'FeatureCollection' ? gj.features : [gj];
             setAquiferList(features.map((f: any) => ({
               id: String(f.properties?.aquifer_id || ''),
               name: f.properties?.aquifer_name || ''
             })));
           }
-        } catch {}
-      }
+        }
+      } catch {}
 
-      // Load wells for aquifer lookup and GSE
+      // Load wells for aquifer lookup, GSE, and full well records for matching
       try {
         const res = await freshFetch(`/data/${regionId}/wells.csv`);
         if (res.ok) {
@@ -114,15 +141,46 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           const { rows } = parseCSV(text);
           const aqMap: Record<string, string> = {};
           const gseMap: Record<string, number> = {};
+          const fullWells: ExistingWell[] = [];
           for (const r of rows) {
             if (r.well_id) {
               aqMap[r.well_id] = r.aquifer_id || '0';
               const gse = parseFloat(r.gse);
               if (!isNaN(gse)) gseMap[r.well_id] = gse;
+              fullWells.push({
+                well_id: r.well_id,
+                well_name: r.well_name || '',
+                lat: parseFloat(r.lat),
+                lng: parseFloat(r.long),
+                aquifer_id: r.aquifer_id || '0',
+                gse: isNaN(gse) ? 0 : gse,
+              });
             }
           }
           setWellAquiferMap(aqMap);
           setWellGseMap(gseMap);
+          setExistingWellsFull(fullWells);
+        }
+      } catch {}
+
+      // Load catalog + cross-region data types for column detection
+      try {
+        const cat = await loadCatalog();
+        setCatalog(cat);
+      } catch {}
+      try {
+        const res = await fetch('/api/regions');
+        if (res.ok) {
+          const all: RegionMeta[] = await res.json();
+          const types: DataType[] = [];
+          const seen = new Set<string>();
+          for (const r of all) {
+            if (r.id === regionId) continue;
+            for (const dt of r.dataTypes || []) {
+              if (!seen.has(dt.code)) { seen.add(dt.code); types.push(dt); }
+            }
+          }
+          setOtherRegionTypes(types);
         }
       } catch {}
     })();
@@ -148,15 +206,25 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
   const hasExistingData = selectedTypes.some(code => (existingCounts[code] || 0) > 0);
 
+  const wellIdRequired = dataSource !== 'upload' || existingWellCount > 0;
+  const smartFields = dataSource === 'upload'
+    ? [
+        { key: 'well_name', label: 'Well Name', required: false },
+        { key: 'lat', label: 'Latitude', required: false },
+        { key: 'long', label: 'Longitude', required: false },
+      ]
+    : [];
   const fieldDefs = isMultiType
     ? [
-        { key: 'well_id', label: 'Well ID', required: true },
+        { key: 'well_id', label: 'Well ID', required: wellIdRequired },
+        ...smartFields,
         { key: 'date', label: 'Date', required: true },
         ...(!singleUnit && aquiferAssignment === 'csv-field'
           ? [{ key: 'aquifer_id', label: 'Aquifer ID', required: false }] : []),
       ]
     : [
-        { key: 'well_id', label: 'Well ID', required: true },
+        { key: 'well_id', label: 'Well ID', required: wellIdRequired },
+        ...smartFields,
         { key: 'date', label: 'Date', required: true },
         { key: 'value', label: 'Value', required: true },
         ...(!singleUnit && aquiferAssignment === 'csv-field'
@@ -169,6 +237,8 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     try {
       const uploaded = await processUploadedFile(f, 'measurements');
       setFile(uploaded);
+      setMatchResults(null);
+      setMatchSummary(null);
 
       if (uploaded.mapping['date'] && Array.isArray(uploaded.data)) {
         const detected = detectDateFormat(uploaded.data as Record<string, string>[], uploaded.mapping['date']);
@@ -180,6 +250,54 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
       setError(`Failed to process: ${err}`);
     }
   };
+
+  // Auto-detect data-type candidates from CSV headers whenever a file lands
+  useEffect(() => {
+    if (!file || dataSource !== 'upload') { setColumnSuggestions([]); return; }
+    const suggestions = suggestDataTypesFromColumns(file.columns, catalog, dataTypes, otherRegionTypes);
+    // If multi-type is on, pre-include all non-custom matches so the user
+    // sees how the auto-suggestions line up with their type selection.
+    setColumnSuggestions(suggestions);
+  }, [file?.columns, catalog, dataTypes, otherRegionTypes, dataSource]);
+
+  const toggleSuggestion = (column: string) => {
+    setColumnSuggestions(prev => prev.map(s => s.column === column ? { ...s, include: !s.include } : s));
+  };
+
+  const updateSuggestionUnit = (column: string, unit: string) => {
+    setColumnSuggestions(prev => prev.map(s => s.column === column ? { ...s, unit } : s));
+  };
+
+  // Accepted suggestions that will be added to the region + used for the import
+  const acceptedSuggestions = useMemo(
+    () => columnSuggestions.filter(s => s.include),
+    [columnSuggestions]
+  );
+
+  // Data types that don't yet exist in the region and will need to be created
+  const newDataTypesToAdd = useMemo(() => {
+    const existing = new Set(dataTypes.map(d => d.code));
+    return acceptedSuggestions
+      .filter(s => !existing.has(s.code))
+      .map<DataType>(s => ({ code: s.code, name: s.name, unit: s.unit }));
+  }, [acceptedSuggestions, dataTypes]);
+
+  // Apply accepted suggestions to typeColumnMapping + selectedTypes when user
+  // is in multi-type mode. In single-type mode we just leave the suggestions
+  // as guidance and the user picks one "value" column manually.
+  useEffect(() => {
+    if (!isMultiType) return;
+    if (acceptedSuggestions.length === 0) return;
+    const newMapping: Record<string, string> = { ...typeColumnMapping };
+    const codes = new Set(selectedTypes);
+    for (const s of acceptedSuggestions) {
+      newMapping[s.code] = s.column;
+      codes.add(s.code);
+    }
+    setTypeColumnMapping(newMapping);
+    setSelectedTypes(Array.from(codes));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMultiType, acceptedSuggestions]);
 
   const updateMapping = (key: string, value: string) => {
     if (!file) return;
@@ -314,6 +432,68 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     setIsTrimmed(true);
   };
 
+  // Build SourceWellRow[] by deduplicating the CSV on well identity.
+  // One match decision per unique well, not per measurement row.
+  const buildSourceWells = () => {
+    if (!file) return [];
+    const rows = file.data as Record<string, string>[];
+    const wellIdCol = file.mapping['well_id'];
+    const wellNameCol = file.mapping['well_name'];
+    const latCol = file.mapping['lat'];
+    const longCol = file.mapping['long'];
+    const seen = new Map<string, { sourceIndex: number; wellId?: string; wellName?: string; lat?: number; lng?: number }>();
+    rows.forEach((r, i) => {
+      const wellId = wellIdCol ? (r[wellIdCol] || '').trim() : '';
+      const wellName = wellNameCol ? (r[wellNameCol] || '').trim() : '';
+      const latRaw = latCol ? r[latCol] : '';
+      const lngRaw = longCol ? r[longCol] : '';
+      const lat = latRaw ? parseFloat(latRaw) : undefined;
+      const lng = lngRaw ? parseFloat(lngRaw) : undefined;
+      // Dedup key: prefer id, then name, then coord pair
+      const key = wellId || wellName || (lat !== undefined && lng !== undefined ? `${lat.toFixed(5)}|${lng.toFixed(5)}` : '');
+      if (!key || seen.has(key)) return;
+      seen.set(key, {
+        sourceIndex: i,
+        wellId: wellId || undefined,
+        wellName: wellName || undefined,
+        lat: lat !== undefined && !isNaN(lat) ? lat : undefined,
+        lng: lng !== undefined && !isNaN(lng) ? lng : undefined,
+      });
+    });
+    return Array.from(seen.values());
+  };
+
+  const runWellMatching = () => {
+    if (!file) return;
+    setIsMatching(true);
+    try {
+      const sources = buildSourceWells();
+      const results = matchWells(sources, existingWellsFull, { proximityMeters });
+      setMatchResults(results);
+      setMatchSummary(summarizeMatches(results));
+    } finally {
+      setIsMatching(false);
+    }
+  };
+
+  // Toggle rejection of a single proximity match (user wants it treated as new)
+  const toggleRejectMatch = (sourceIndex: number) => {
+    if (!matchResults) return;
+    const updated = matchResults.map(r => {
+      if (r.sourceRow.sourceIndex !== sourceIndex) return r;
+      const rejected = !r.rejected;
+      return {
+        ...r,
+        rejected,
+        // When rejected a proximity match becomes a "new" well if it has coords
+        kind: rejected ? ('new' as const) : r.kind,
+        resolvedWellId: rejected ? null : (r.existingWell?.well_id ?? null),
+      };
+    });
+    setMatchResults(updated);
+    setMatchSummary(summarizeMatches(updated));
+  };
+
   const resolveAquiferId = (row: Record<string, string>): string => {
     if (singleUnit) return '0';
     switch (aquiferAssignment) {
@@ -338,42 +518,155 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     try {
       const allRows = file.data as Record<string, string>[];
       const wellIdCol = file.mapping['well_id'];
+      const wellNameCol = file.mapping['well_name'];
+      const latCol = file.mapping['lat'];
+      const longCol = file.mapping['long'];
       const dateCol = file.mapping['date'];
 
-      // Filter out measurements for wells not in wells.csv
-      const knownWellIds = new Set(Object.keys(wellAquiferMap));
+      // --- Well resolution: build a per-row wellId that accounts for match
+      // results (existing wells) and new wells created during import ----
+      const filesToSave: { path: string; content: string }[] = [];
+      const rowIdentityKey = (r: Record<string, string>): string => {
+        const id = wellIdCol ? (r[wellIdCol] || '').trim() : '';
+        if (id) return id;
+        const name = wellNameCol ? (r[wellNameCol] || '').trim() : '';
+        if (name) return name;
+        const lat = latCol ? r[latCol] : '';
+        const lng = longCol ? r[longCol] : '';
+        if (lat && lng) return `${parseFloat(lat).toFixed(5)}|${parseFloat(lng).toFixed(5)}`;
+        return '';
+      };
+
+      // Compose identityKey → final wellId (and track aquifer lookup)
+      const identityToWellId = new Map<string, string>();
+      const newWellRecords: ExistingWell[] = [];
+      const takenIds = new Set<string>(existingWellsFull.map(w => w.well_id));
+
+      if (matchResults && matchResults.length > 0) {
+        // For rows with existing matches, use the existing well_id
+        for (const r of matchResults) {
+          const srcKey = r.sourceRow.wellId || r.sourceRow.wellName || (r.sourceRow.lat !== undefined && r.sourceRow.lng !== undefined ? `${r.sourceRow.lat.toFixed(5)}|${r.sourceRow.lng.toFixed(5)}` : '');
+          if (!srcKey) continue;
+          if (r.resolvedWellId && !r.rejected) {
+            identityToWellId.set(srcKey, r.resolvedWellId);
+          }
+        }
+
+        // Collect new wells (kind='new' or rejected proximity) and
+        // create aqx- records for them
+        const newRows = matchResults.filter(r => (r.kind === 'new' || r.rejected) && r.sourceRow.lat !== undefined && r.sourceRow.lng !== undefined);
+        if (newRows.length > 0) {
+          const gseInput = newRows.map((r, i) => ({
+            id: `__new_${i}`,
+            lat: r.sourceRow.lat!,
+            lng: r.sourceRow.lng!,
+          }));
+          setNewWellsGseProgress({ done: 0, total: newRows.length });
+          const gse = await fetchGseBatch(gseInput, {
+            lengthUnit,
+            onProgress: (done, total) => setNewWellsGseProgress({ done, total }),
+          });
+
+          newRows.forEach((r, i) => {
+            const srcKey = r.sourceRow.wellId || r.sourceRow.wellName || `${r.sourceRow.lat!.toFixed(5)}|${r.sourceRow.lng!.toFixed(5)}`;
+            const aqx = generateAqxId(r.sourceRow.wellName || null, r.sourceRow.lat!, r.sourceRow.lng!, takenIds);
+            takenIds.add(aqx);
+            const aquiferId = singleUnit
+              ? '0'
+              : (aquifersGeojson ? (assignWellToAquifer(r.sourceRow.lat!, r.sourceRow.lng!, aquifersGeojson) || '') : '');
+            const elev = gse.values.get(`__new_${i}`) ?? 0;
+            const rec: ExistingWell = {
+              well_id: aqx,
+              well_name: r.sourceRow.wellName || aqx,
+              lat: r.sourceRow.lat!,
+              lng: r.sourceRow.lng!,
+              aquifer_id: aquiferId,
+              gse: elev,
+            };
+            newWellRecords.push(rec);
+            identityToWellId.set(srcKey, aqx);
+          });
+        }
+      }
+
+      // Fallback for rows not touched by matching: trust the CSV well_id
+      // (original behavior). This covers the happy path where wells already
+      // exist and the user didn't run matching.
+      const knownWellIds = new Set([
+        ...Object.keys(wellAquiferMap),
+        ...newWellRecords.map(w => w.well_id),
+      ]);
+
+      // If matching ran, expand the known set with the resolved IDs so rows pass the filter
+      for (const wid of identityToWellId.values()) knownWellIds.add(wid);
+
+      // Per-row resolver: take original well_id, fall back to identity lookup
+      const rowToWellId = (r: Record<string, string>): string => {
+        const rawId = wellIdCol ? (r[wellIdCol] || '').trim() : '';
+        if (rawId && knownWellIds.has(rawId)) return rawId;
+        const key = rowIdentityKey(r);
+        return identityToWellId.get(key) || rawId;
+      };
+
+      // Filter out measurements whose wells can't be resolved to a real well
       const rows = knownWellIds.size > 0
-        ? allRows.filter(r => knownWellIds.has(r[wellIdCol]))
+        ? allRows.filter(r => {
+            const wid = rowToWellId(r);
+            return wid && knownWellIds.has(wid);
+          })
         : allRows;
 
-      if (isMultiType && selectedTypes.length > 1) {
-        // Multi-type: one value column per type
-        const filesToSave: { path: string; content: string }[] = [];
+      // --- Build extended aquifer lookup including new wells
+      const effectiveWellAquiferMap: Record<string, string> = { ...wellAquiferMap };
+      for (const w of newWellRecords) effectiveWellAquiferMap[w.well_id] = w.aquifer_id || '0';
 
+      // Override resolveAquiferId's 'from-wells' path via a closure replacement
+      const resolveAquifer = (row: Record<string, string>): string => {
+        if (singleUnit) return '0';
+        switch (aquiferAssignment) {
+          case 'from-wells': {
+            const wid = rowToWellId(row);
+            return effectiveWellAquiferMap[wid] || '';
+          }
+          case 'single':
+            return selectedAquiferId;
+          case 'csv-field': {
+            const col = file.mapping['aquifer_id'];
+            return col ? row[col] || '' : '';
+          }
+          default: return '';
+        }
+      };
+
+      // Effective GSE lookup used by depth→elevation conversion (new wells
+      // included)
+      const effectiveGseMap: Record<string, number> = { ...wellGseMap };
+      for (const w of newWellRecords) if (w.gse) effectiveGseMap[w.well_id] = w.gse;
+
+      if (isMultiType && selectedTypes.length > 1) {
         for (const typeCode of selectedTypes) {
           const valueCol = typeColumnMapping[typeCode];
           if (!valueCol) continue;
 
-          const dt = dataTypes.find(d => d.code === typeCode);
           const isWteDepth = typeCode === 'wte' && wteIsDepth;
 
           let processed = rows
-            .filter(r => r[wellIdCol] && r[dateCol] && r[valueCol])
+            .filter(r => rowToWellId(r) && r[dateCol] && r[valueCol])
             .map(r => {
+              const wid = rowToWellId(r);
               let val = r[valueCol];
               if (isWteDepth) {
-                const wellId = r[wellIdCol];
-                const gse = wellGseMap[wellId] || 0;
+                const gse = effectiveGseMap[wid] || 0;
                 const raw = parseFloat(val);
                 if (!isNaN(raw) && gse > 0) {
                   val = String(Math.round((gse - Math.abs(raw)) * 100) / 100);
                 }
               }
               return {
-                well_id: r[wellIdCol],
+                well_id: wid,
                 date: parseDate(r[dateCol], dateFormat),
                 value: val,
-                aquifer_id: resolveAquiferId(r)
+                aquifer_id: resolveAquifer(r),
               };
             });
 
@@ -385,8 +678,6 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
             processed.map(m => `${m.well_id},${m.date},${m.value},${m.aquifer_id}`).join('\n');
           filesToSave.push({ path: `${regionId}/data_${typeCode}.csv`, content: csv });
         }
-
-        await saveFiles(filesToSave);
       } else {
         // Single type
         const typeCode = selectedTypes[0] || 'wte';
@@ -394,22 +685,22 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         const isWteDepth = typeCode === 'wte' && wteIsDepth;
 
         let processed = rows
-          .filter(r => r[wellIdCol] && r[dateCol] && r[valueCol])
+          .filter(r => rowToWellId(r) && r[dateCol] && r[valueCol])
           .map(r => {
+            const wid = rowToWellId(r);
             let val = r[valueCol];
             if (isWteDepth) {
-              const wellId = r[wellIdCol];
-              const gse = wellGseMap[wellId] || 0;
+              const gse = effectiveGseMap[wid] || 0;
               const raw = parseFloat(val);
               if (!isNaN(raw) && gse > 0) {
                 val = String(Math.round((gse - Math.abs(raw)) * 100) / 100);
               }
             }
             return {
-              well_id: r[wellIdCol],
+              well_id: wid,
               date: parseDate(r[dateCol], dateFormat),
               value: val,
-              aquifer_id: resolveAquiferId(r)
+              aquifer_id: resolveAquifer(r),
             };
           });
 
@@ -420,7 +711,6 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           } else if (usgsMode === 'full-refresh') {
             processed = await mergeWithExistingFullRefresh(typeCode, processed);
           } else {
-            // fresh+append, quick-refresh: standard merge (skip dupes)
             processed = await mergeWithExisting(typeCode, processed);
           }
         } else if (importMode === 'append') {
@@ -429,8 +719,39 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
         const csv = 'well_id,date,value,aquifer_id\n' +
           processed.map(m => `${m.well_id},${m.date},${m.value},${m.aquifer_id}`).join('\n');
-        await saveFiles([{ path: `${regionId}/data_${typeCode}.csv`, content: csv }]);
+        filesToSave.push({ path: `${regionId}/data_${typeCode}.csv`, content: csv });
       }
+
+      // --- Persist new wells (if any) by appending to wells.csv ---
+      if (newWellRecords.length > 0) {
+        // Read existing wells.csv to preserve header/columns; fall back to building from existingWellsFull
+        let existingText = '';
+        try {
+          const res = await freshFetch(`/data/${regionId}/wells.csv`);
+          if (res.ok) existingText = await res.text();
+        } catch {}
+        const header = 'well_id,well_name,lat,long,gse,aquifer_id,aquifer_name';
+        const existingLines = existingText.trim().split('\n').filter(Boolean);
+        const bodyLines = existingLines.length > 0 ? existingLines.slice(1) : [];
+        const aquiferNameById = new Map<string, string>(aquiferList.map(a => [a.id, a.name]));
+        const newLines = newWellRecords.map(w => {
+          const aquiferName = aquiferNameById.get(w.aquifer_id) || '';
+          return `${w.well_id},"${(w.well_name || '').replace(/"/g, '""')}",${w.lat},${w.lng},${w.gse},${w.aquifer_id},"${aquiferName.replace(/"/g, '""')}"`;
+        });
+        filesToSave.push({
+          path: `${regionId}/wells.csv`,
+          content: [header, ...bodyLines, ...newLines].join('\n'),
+        });
+      }
+
+      // --- Persist new data types (if any) by updating region.json ---
+      if (newDataTypesToAdd.length > 0) {
+        const updatedTypes = [...dataTypes, ...newDataTypesToAdd];
+        const meta: RegionMeta = { id: regionId, name: regionName, lengthUnit, singleUnit, dataTypes: updatedTypes };
+        filesToSave.push({ path: `${regionId}/region.json`, content: JSON.stringify(meta, null, 2) });
+      }
+
+      await saveFiles(filesToSave);
       onComplete();
     } catch (err) {
       setError(`Failed to save: ${err}`);
@@ -522,7 +843,8 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     );
   };
 
-  // Compute unmatched well info
+  // Compute unmatched well info — only surfaces warnings for IDs that
+  // weren't handled by the smart-matching pipeline.
   const unmatchedInfo = useMemo(() => {
     if (!file) return null;
     const rows = file.data as Record<string, string>[];
@@ -532,6 +854,16 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     const knownWellIds = new Set(Object.keys(wellAquiferMap));
     if (knownWellIds.size === 0) return null;
 
+    // If matching ran, consider wells resolved via match results (existing + new) as "known"
+    const resolvedFromMatch = new Set<string>();
+    if (matchResults) {
+      for (const r of matchResults) {
+        if (r.rejected) continue;
+        if (r.resolvedWellId) resolvedFromMatch.add(r.resolvedWellId);
+        if (r.sourceRow.wellId) resolvedFromMatch.add(r.sourceRow.wellId); // source id covered
+      }
+    }
+
     const unmatchedWellIds = new Set<string>();
     let unmatchedCount = 0;
     let matchedCount = 0;
@@ -539,7 +871,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     for (const row of rows) {
       const wellId = row[wellIdCol];
       if (!wellId) continue;
-      if (knownWellIds.has(wellId)) {
+      if (knownWellIds.has(wellId) || resolvedFromMatch.has(wellId)) {
         matchedCount++;
       } else {
         unmatchedWellIds.add(wellId);
@@ -554,13 +886,18 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
       unmatchedCount,
       matchedCount,
     };
-  }, [file, wellAquiferMap]);
+  }, [file, wellAquiferMap, matchResults]);
 
-  const isReady = file && file.mapping['well_id'] && file.mapping['date'] &&
+  const hasSmartColumns = !!(file && (file.mapping['lat'] || file.mapping['long'] || file.mapping['well_name']));
+  const hasMatchResults = !!matchResults && matchResults.length > 0;
+  const isBootstrap = existingWellCount === 0;
+
+  const isReady = file && file.mapping['date'] &&
+    (file.mapping['well_id'] || hasMatchResults || isBootstrap) &&
     (isMultiType ? selectedTypes.every(code => typeColumnMapping[code]) : file.mapping['value']) &&
     selectedTypes.length > 0 &&
     (singleUnit || aquiferAssignment !== 'single' || selectedAquiferId) &&
-    (!unmatchedInfo || unmatchedInfo.matchedCount > 0);
+    (!unmatchedInfo || unmatchedInfo.matchedCount > 0 || hasMatchResults);
 
   return (
     <div className="fixed inset-0 z-[105] flex items-center justify-center bg-black/40" onClick={onClose}>
@@ -851,6 +1188,127 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
                 </>
               )}
             </button>
+          </div>
+        )}
+
+        {/* Detected data types panel — only in upload flow with catalog-loaded suggestions */}
+        {file && dataSource === 'upload' && columnSuggestions.length > 0 && (
+          <div className="mb-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <Wand2 size={14} className="text-indigo-600" />
+              <span className="text-sm font-medium text-indigo-800">Detected data columns</span>
+            </div>
+            <p className="text-xs text-indigo-700 mb-3">
+              We found columns that look like measurement types. Check the ones you want to import — new types will be added to this region on save.
+            </p>
+            <div className="space-y-1 max-h-56 overflow-y-auto">
+              {columnSuggestions.map(s => (
+                <div key={s.column} className="flex items-center gap-2 py-1 border-b border-indigo-100 last:border-0">
+                  <input
+                    type="checkbox"
+                    checked={s.include}
+                    onChange={() => toggleSuggestion(s.column)}
+                    className="text-indigo-600 rounded"
+                  />
+                  <span className="flex-1 text-xs text-slate-700">
+                    <span className="font-mono text-indigo-700">{s.column}</span>
+                    <span className="text-slate-400"> → </span>
+                    <span className="font-medium">{s.name}</span>
+                    <span className="font-mono text-slate-400"> ({s.code})</span>
+                  </span>
+                  <input
+                    type="text"
+                    value={s.unit}
+                    onChange={e => updateSuggestionUnit(s.column, e.target.value)}
+                    placeholder="unit"
+                    className="w-16 px-1.5 py-0.5 border border-indigo-200 rounded text-xs"
+                  />
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                    s.source === 'catalog' ? 'bg-blue-100 text-blue-700' :
+                    s.source === 'existing' ? 'bg-green-100 text-green-700' :
+                    s.source === 'otherRegion' ? 'bg-purple-100 text-purple-700' :
+                    'bg-slate-200 text-slate-600'
+                  }`}>
+                    {s.source === 'catalog' ? 'catalog' : s.source === 'existing' ? 'in region' : s.source === 'otherRegion' ? 'other region' : 'custom'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {newDataTypesToAdd.length > 0 && (
+              <p className="text-xs text-indigo-700 mt-2">
+                {newDataTypesToAdd.length} new type{newDataTypesToAdd.length !== 1 ? 's' : ''} will be added to the region.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Smart well matching panel — only when lat/lng are mapped */}
+        {file && dataSource === 'upload' && hasSmartColumns && (
+          <div className="mb-4 p-4 bg-sky-50 border border-sky-200 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <MapPin size={14} className="text-sky-600" />
+              <span className="text-sm font-medium text-sky-800">Well matching</span>
+            </div>
+            <p className="text-xs text-sky-700 mb-3">
+              Match source rows to existing wells by ID, name, or proximity. Unmatched rows with coordinates become new wells.
+            </p>
+            <div className="flex items-center gap-2 mb-3">
+              <label className="text-xs text-slate-600">Proximity threshold (m):</label>
+              <input
+                type="number"
+                value={proximityMeters}
+                min={1}
+                max={5000}
+                onChange={e => setProximityMeters(Math.max(1, parseInt(e.target.value || '100', 10)))}
+                className="w-20 px-2 py-1 border border-sky-200 rounded text-xs"
+              />
+              <button
+                onClick={runWellMatching}
+                disabled={isMatching}
+                className="ml-auto px-3 py-1.5 bg-sky-600 text-white rounded text-xs font-medium hover:bg-sky-700 disabled:opacity-50 flex items-center gap-1"
+              >
+                {isMatching && <Loader2 size={12} className="animate-spin" />}
+                {matchResults ? 'Re-match' : 'Match wells'}
+              </button>
+            </div>
+            {matchSummary && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-5 gap-1 text-center text-xs">
+                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-slate-800">{matchSummary.byId}</div><div className="text-[10px] text-slate-500">by ID</div></div>
+                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-slate-800">{matchSummary.byName}</div><div className="text-[10px] text-slate-500">by name</div></div>
+                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-slate-800">{matchSummary.byProximity}</div><div className="text-[10px] text-slate-500">by proximity</div></div>
+                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-green-700">{matchSummary.newWells}</div><div className="text-[10px] text-slate-500">new</div></div>
+                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className={`font-bold ${matchSummary.unmatched > 0 ? 'text-red-600' : 'text-slate-400'}`}>{matchSummary.unmatched}</div><div className="text-[10px] text-slate-500">unmatched</div></div>
+                </div>
+                {matchResults && matchResults.some(r => r.kind === 'proximity' && !r.rejected) && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-sky-700 hover:text-sky-800">Review proximity matches ({matchResults.filter(r => r.kind === 'proximity' && !r.rejected).length})</summary>
+                    <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                      {matchResults.filter(r => r.kind === 'proximity' && !r.rejected).map(r => (
+                        <div key={r.sourceRow.sourceIndex} className="flex items-center gap-2 py-1 border-b border-sky-100 last:border-0">
+                          <span className="flex-1 text-[11px] text-slate-700">
+                            "{r.sourceRow.wellName || r.sourceRow.wellId || '(no name)'}" → <span className="font-medium">{r.existingWell?.well_name || r.existingWell?.well_id}</span>
+                            <span className="text-slate-400"> · {Math.round(r.distanceMeters || 0)}m</span>
+                          </span>
+                          <button
+                            onClick={() => toggleRejectMatch(r.sourceRow.sourceIndex)}
+                            className="text-[10px] text-red-600 hover:text-red-800 font-medium"
+                          >
+                            Treat as new
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+                {newWellsGseProgress.total > 0 && newWellsGseProgress.done < newWellsGseProgress.total && (
+                  <p className="text-xs text-sky-700 flex items-center gap-1">
+                    <Loader2 size={10} className="animate-spin" />
+                    Fetching elevation for new wells ({newWellsGseProgress.done}/{newWellsGseProgress.total})
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
