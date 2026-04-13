@@ -169,7 +169,7 @@ Each data type gets its own CSV file: `data_{code}.csv`. The `DataTypeEditor` co
 
 **Keep per-region data types** for flexibility, but add a **shared parameter catalog** that provides standardized defaults and USGS mapping.
 
-### The Catalog: `public/data/catalog.json`
+### The Catalog: `public/data/catalog_wq.json`
 
 A global lookup table of well-known water quality parameters:
 
@@ -180,6 +180,8 @@ A global lookup table of well-known water quality parameters:
       "name": "Nitrate",
       "unit": "mg/L",
       "group": "Nutrient",
+      "mcl": 10,
+      "who": 50,
       "wqp": {
         "characteristicName": "Nitrate",
         "sampleFraction": "Filtered"
@@ -189,6 +191,8 @@ A global lookup table of well-known water quality parameters:
       "name": "Arsenic",
       "unit": "ug/L",
       "group": "Inorganics, Minor, Metals",
+      "mcl": 10,
+      "who": 10,
       "wqp": {
         "characteristicName": "Arsenic",
         "sampleFraction": "Filtered"
@@ -198,6 +202,8 @@ A global lookup table of well-known water quality parameters:
       "name": "pH",
       "unit": "",
       "group": "Physical",
+      "mcl": null,
+      "who": null,
       "wqp": {
         "characteristicName": "pH",
         "sampleFraction": null
@@ -207,6 +213,8 @@ A global lookup table of well-known water quality parameters:
       "name": "Specific Conductance",
       "unit": "uS/cm",
       "group": "Physical",
+      "mcl": null,
+      "who": null,
       "wqp": {
         "characteristicName": "Specific conductance",
         "sampleFraction": null
@@ -216,6 +224,8 @@ A global lookup table of well-known water quality parameters:
       "name": "Total Dissolved Solids",
       "unit": "mg/L",
       "group": "Physical",
+      "mcl": null,
+      "who": null,
       "wqp": {
         "characteristicName": "Total dissolved solids",
         "sampleFraction": null
@@ -225,6 +235,8 @@ A global lookup table of well-known water quality parameters:
       "name": "Chloride",
       "unit": "mg/L",
       "group": "Inorganics, Major, Non-metals",
+      "mcl": 250,
+      "who": null,
       "wqp": {
         "characteristicName": "Chloride",
         "sampleFraction": "Filtered"
@@ -240,14 +252,15 @@ A global lookup table of well-known water quality parameters:
 2. **Standardized defaults for the DataTypeEditor** — Instead of (or in addition to) cross-region suggestions, show catalog entries as "standard" options. This prevents typos and inconsistency.
 3. **Parameter picker for WQP downloads** — The catalog groups parameters by category, making it easy to build a grouped checkbox UI for selecting what to download.
 4. **Region-level override** — A region still owns its `dataTypes` array. If Jamaica wants to call it "Sulphate" instead of "Sulfate", or use `mgCaCO3/L` for hardness, that's fine. The catalog provides defaults; the region has final say.
+5. **Regulatory reference lines** — `mcl` (EPA Maximum Contaminant Level) and `who` (WHO guideline) values per parameter. When viewing a WQ time series, the chart offers toggles to show these as horizontal reference lines. Values are in the parameter's native unit (e.g. `mcl: 10` for nitrate means 10 mg/L). Null when no standard exists (e.g. pH, conductivity).
 
 ### How per-region types and the catalog interact
 
 ```
 ┌─────────────────────────────────┐
-│         catalog.json            │  Global, shared, checked in
+│       catalog_wq.json           │  Global, shared, checked in
 │  (standardized parameters       │  Provides: code, name, unit,
-│   with USGS mapping)            │  USGS characteristic + pcode
+│   with WQP mapping + MCL/WHO)   │  WQP characteristic mapping
 └──────────┬──────────────────────┘
            │
            │  "Add from catalog" or
@@ -275,6 +288,8 @@ interface CatalogParameter {
   name: string;
   unit: string;
   group: string;         // e.g. "Nutrient", "Physical", "Inorganics, Minor, Metals"
+  mcl: number | null;    // EPA Maximum Contaminant Level (in parameter's unit), null if none
+  who: number | null;    // WHO guideline value (in parameter's unit), null if none
   wqp?: {
     characteristicName: string;       // WQP CharacteristicName value
     sampleFraction: string | null;    // "Filtered", "Unfiltered", or null
@@ -295,6 +310,7 @@ interface ParameterCatalog {
 | `region.json` | No change — catalog codes are just used as defaults |
 | USGS well download | No change to well discovery |
 | WQP measurement download | New flow: query WQP, map results through catalog to data types |
+| Time series chart | Add toggleable EPA MCL and WHO guideline reference lines for WQ data types (values from catalog) |
 
 ### DataTypeEditor redesign
 
@@ -417,8 +433,8 @@ The MeasurementImporter assumes all wells already exist in `wells.csv`. But in p
 - Should be: app detects new wells, offers to add them in the same flow.
 
 **UC3: User has no wells at all**
-- Currently blocked — Measurements card is dimmed when wellCount = 0.
-- With smart discovery: the measurement import itself can bootstrap the well set.
+- Measurements card is enabled even when wellCount = 0. Options requiring existing wells are dimmed within the importer.
+- The measurement import itself can bootstrap the well set when the data source includes well locations.
 
 **UC4: Partial overlap**
 - Some wells match, some are new. Most realistic scenario.
@@ -485,9 +501,9 @@ Generated IDs are checked against existing `wells.csv` to avoid collisions. The 
 5. **For unmatched wells without lat/lon:**
    - Warn: "X wells not found and no coordinates — their measurements will be skipped"
 
-##### Un-dimming the Measurements card
+##### Un-dimming the Measurements card — DECIDED
 
-This also means **un-dimming the Measurements card** when wellCount = 0, at least for data sources that include well locations (USGS download, or CSV with lat/lon columns).
+The Measurements card is **always enabled**, even when wellCount = 0. Data sources that include well locations (WQP download, CSV with lat/lon) can bootstrap the well set from scratch. Within the importer, options that specifically require existing wells (e.g. matching to existing wells) are dimmed/disabled when no wells exist, but the import flow itself is accessible.
 
 ##### Benefits across all import flows
 
@@ -623,7 +639,7 @@ The `data_{code}.csv` format expects one value per well per date, so deduplicati
 2. If still duplicated, take the first result (deterministic, simple)
 3. Report duplicates dropped in the data quality summary
 
-**Not fully resolved** — needs investigation of actual WQP response data during implementation to understand how common this is and whether more nuanced handling is needed.
+This strategy is the default for Phase 4. Will validate against real WQP response data during implementation and adjust if edge cases emerge.
 
 ### 10. Reuse of existing infrastructure
 - `fetchWithRetry` — pattern reusable, but WQP needs no API key, so a simpler WQP-specific fetch function is probably cleaner
@@ -639,7 +655,7 @@ The `data_{code}.csv` format expects one value per well per date, so deduplicati
 
 | Feature | Scope | Benefits |
 |---------|-------|---------|
-| **Parameter catalog** (`catalog.json`) | All regions | Standardized data type definitions for any region worldwide |
+| **Parameter catalog** (`catalog_wq.json`) | All regions | Standardized data type definitions for any region worldwide |
 | **DataTypeEditor redesign** (catalog browse) | All regions | One-click data type creation from catalog for Jamaica, Jordan, etc. |
 | **Smart well discovery** (matching + auto-add) | All regions | Any CSV import with lat/lon benefits, regardless of country |
 | **Proximity-based well matching** | All regions | Solves the Jamaica-style name mismatch problem everywhere |
@@ -654,7 +670,7 @@ The catalog + DataTypeEditor + smart well discovery are **standalone deliverable
 ## Implementation phasing (suggested)
 
 **Phase 1: Catalog + DataTypeEditor redesign** (all regions)
-- Create `catalog.json` with ~35 common parameters + WQP mapping
+- Create `catalog_wq.json` with ~35 common parameters + WQP mapping + MCL/WHO values
 - Redesign DataTypeEditor: catalog browse as primary, cross-region suggestions for custom types, manual as fallback
 - No API integration yet — just better data type management
 
@@ -677,14 +693,7 @@ The catalog + DataTypeEditor + smart well discovery are **standalone deliverable
 
 ---
 
-## Open Questions
+## Notes
 
-1. **Visualization** — Water quality time series are sparse and irregular. Does the existing Recharts-based chart work well for this, or does it need adaptation (e.g. scatter plot vs. line chart)?
-
-2. **Regulatory context** — Should the app display EPA MCLs (Maximum Contaminant Levels) or WHO guidelines as reference lines on charts? Could be a future addition to the catalog (a `mcl` field per parameter).
-
-3. **Catalog file location** — `public/data/catalog.json` keeps it with the data. Alternatively, it could be a TypeScript constant in the source code since it changes rarely. JSON file is more accessible for non-developer editing.
-
-4. **Un-dimming measurements when wellCount = 0** — Currently the Measurements card is disabled until wells exist. With smart well discovery, we could allow measurement import even with no wells (for sources that include well locations). How aggressive should this be? Always enabled? Only when data source includes well locations?
-
-5. **Duplicate results deduplication** — Need to investigate actual WQP response data to determine how common duplicates are and what strategy works best. Flag for Phase 4 implementation.
+- **Visualization**: Keep the current Recharts line chart for WQ time series. Revisit if sparse/irregular data proves problematic.
+- **Duplicate deduplication**: Deferred to Phase 4 — validate the filter-by-fraction + take-first strategy against real WQP data during implementation.
