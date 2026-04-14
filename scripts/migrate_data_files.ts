@@ -74,9 +74,7 @@ function main() {
       name: region.name,
       lengthUnit: region.lengthUnit || 'ft',
       singleUnit: false,
-      dataTypes: [
-        { code: 'wte', name: 'Water Table Elevation', unit: region.lengthUnit || 'ft' }
-      ]
+      customDataTypes: [],
     };
     const regionJsonPath = path.join(folderPath, 'region.json');
     fs.writeFileSync(regionJsonPath, JSON.stringify(regionMeta, null, 2), 'utf-8');

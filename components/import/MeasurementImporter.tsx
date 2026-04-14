@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload, Calendar, MapPin, Wand2 } from 'lucide-react';
+import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload, Calendar, MapPin, Wand2, BookOpen } from 'lucide-react';
 import { processUploadedFile, UploadedFile, saveFiles, parseDate, detectDateFormat, parseCSV, isInUS, freshFetch, assignWellToAquifer } from '../../services/importUtils';
 import { fetchUSGSMeasurements, validateUSGSMeasurements, USGSDataQualityReport, USGSMeasurement, USGSDataSpan, computeDataSpan, filterByDateRange, getUSGSApiKey, setUSGSApiKey } from '../../services/usgsApi';
 import { loadCatalog } from '../../services/catalog';
+import CatalogBrowser from '../CatalogBrowser';
 import {
   matchWells,
   summarizeMatches,
@@ -23,7 +24,12 @@ interface MeasurementImporterProps {
   regionName: string;
   lengthUnit: 'ft' | 'm';
   singleUnit: boolean;
+  /** Effective set of data types for this region (WTE + catalog types with
+   *  data + customs with data). Drives the type picker UI. */
   dataTypes: DataType[];
+  /** The region's custom (non-catalog) types from region.json. Used when
+   *  persisting new non-catalog additions to disk. */
+  customDataTypes: DataType[];
   regionBounds: [number, number, number, number];
   existingWellCount: number;
   onComplete: () => void;
@@ -36,7 +42,7 @@ type USGSMode = 'fresh' | 'quick-refresh' | 'full-refresh';
 type AquiferAssignment = 'from-wells' | 'single' | 'csv-field';
 
 const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
-  regionId, regionName, lengthUnit, singleUnit, dataTypes, regionBounds, existingWellCount, onComplete, onClose
+  regionId, regionName, lengthUnit, singleUnit, dataTypes, customDataTypes, regionBounds, existingWellCount, onComplete, onClose
 }) => {
   const [dataSource, setDataSource] = useState<DataSource>('upload');
   const [file, setFile] = useState<UploadedFile | null>(null);
@@ -107,6 +113,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   const [proximityMeters, setProximityMeters] = useState(100);
   const [isMatching, setIsMatching] = useState(false);
   const [newWellsGseProgress, setNewWellsGseProgress] = useState({ done: 0, total: 0 });
+  const [showCatalogBrowser, setShowCatalogBrowser] = useState(false);
 
   const regionOverlapsUS = isInUS(
     (regionBounds[0] + regionBounds[2]) / 2,
@@ -171,12 +178,17 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
       try {
         const res = await fetch('/api/regions');
         if (res.ok) {
-          const all: RegionMeta[] = await res.json();
+          const all: any[] = await res.json();
           const types: DataType[] = [];
           const seen = new Set<string>();
           for (const r of all) {
             if (r.id === regionId) continue;
-            for (const dt of r.dataTypes || []) {
+            const others: DataType[] = Array.isArray(r.customDataTypes)
+              ? r.customDataTypes
+              : Array.isArray(r.dataTypes)
+                ? r.dataTypes
+                : [];
+            for (const dt of others) {
               if (!seen.has(dt.code)) { seen.add(dt.code); types.push(dt); }
             }
           }
@@ -274,13 +286,16 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     [columnSuggestions]
   );
 
-  // Data types that don't yet exist in the region and will need to be created
-  const newDataTypesToAdd = useMemo(() => {
-    const existing = new Set(dataTypes.map(d => d.code));
+  // Custom (non-catalog) data types accepted via the detection panel that
+  // don't yet exist in the region's customDataTypes list. Catalog matches
+  // don't need to be "added" — they appear automatically once the data file
+  // is written on disk.
+  const newCustomTypesToAdd = useMemo(() => {
+    const existingCustom = new Set(customDataTypes.map(d => d.code));
     return acceptedSuggestions
-      .filter(s => !existing.has(s.code))
+      .filter(s => s.source === 'custom' && !existingCustom.has(s.code))
       .map<DataType>(s => ({ code: s.code, name: s.name, unit: s.unit }));
-  }, [acceptedSuggestions, dataTypes]);
+  }, [acceptedSuggestions, customDataTypes]);
 
   // Apply accepted suggestions to typeColumnMapping + selectedTypes when user
   // is in multi-type mode. In single-type mode we just leave the suggestions
@@ -744,10 +759,12 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         });
       }
 
-      // --- Persist new data types (if any) by updating region.json ---
-      if (newDataTypesToAdd.length > 0) {
-        const updatedTypes = [...dataTypes, ...newDataTypesToAdd];
-        const meta: RegionMeta = { id: regionId, name: regionName, lengthUnit, singleUnit, dataTypes: updatedTypes };
+      // --- Persist new custom data types (if any) by updating region.json.
+      // Catalog-backed types don't need to be recorded — they become
+      // effective automatically when their CSV file exists.
+      if (newCustomTypesToAdd.length > 0) {
+        const updatedCustom = [...customDataTypes, ...newCustomTypesToAdd];
+        const meta: RegionMeta = { id: regionId, name: regionName, lengthUnit, singleUnit, customDataTypes: updatedCustom };
         filesToSave.push({ path: `${regionId}/region.json`, content: JSON.stringify(meta, null, 2) });
       }
 
@@ -1194,9 +1211,17 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         {/* Detected data types panel — only in upload flow with catalog-loaded suggestions */}
         {file && dataSource === 'upload' && columnSuggestions.length > 0 && (
           <div className="mb-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-            <div className="flex items-center gap-2 mb-2">
-              <Wand2 size={14} className="text-indigo-600" />
-              <span className="text-sm font-medium text-indigo-800">Detected data columns</span>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Wand2 size={14} className="text-indigo-600" />
+                <span className="text-sm font-medium text-indigo-800">Detected data columns</span>
+              </div>
+              <button
+                onClick={() => setShowCatalogBrowser(true)}
+                className="inline-flex items-center gap-1 text-xs text-indigo-700 hover:text-indigo-900 font-medium"
+              >
+                <BookOpen size={12} /> View Catalog
+              </button>
             </div>
             <p className="text-xs text-indigo-700 mb-3">
               We found columns that look like measurement types. Check the ones you want to import — new types will be added to this region on save.
@@ -1234,9 +1259,9 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
                 </div>
               ))}
             </div>
-            {newDataTypesToAdd.length > 0 && (
+            {newCustomTypesToAdd.length > 0 && (
               <p className="text-xs text-indigo-700 mt-2">
-                {newDataTypesToAdd.length} new type{newDataTypesToAdd.length !== 1 ? 's' : ''} will be added to the region.
+                {newCustomTypesToAdd.length} new custom type{newCustomTypesToAdd.length !== 1 ? 's' : ''} will be added to the region.
               </p>
             )}
           </div>
@@ -1470,6 +1495,8 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           onCancel={() => setShowReplaceConfirm(false)}
         />
       )}
+
+      {showCatalogBrowser && <CatalogBrowser onClose={() => setShowCatalogBrowser(false)} />}
     </div>
   );
 };

@@ -20,11 +20,20 @@ function saveDataPlugin(): Plugin {
           const regions: any[] = [];
           for (const entry of entries) {
             if (!entry.isDirectory()) continue;
-            const regionJsonPath = path.join(dataDir, entry.name, 'region.json');
+            const regionDir = path.join(dataDir, entry.name);
+            const regionJsonPath = path.join(regionDir, 'region.json');
             if (fs.existsSync(regionJsonPath)) {
               try {
                 const meta = JSON.parse(fs.readFileSync(regionJsonPath, 'utf-8'));
-                regions.push(meta);
+                // Scan for data_*.csv so the client can compute effective
+                // data types without needing to probe each file individually.
+                const dataFiles: string[] = [];
+                try {
+                  for (const f of fs.readdirSync(regionDir)) {
+                    if (f.startsWith('data_') && f.endsWith('.csv')) dataFiles.push(f);
+                  }
+                } catch {}
+                regions.push({ ...meta, dataFiles });
               } catch (e) {
                 // skip malformed region.json
               }

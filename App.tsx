@@ -690,7 +690,7 @@ const App: React.FC = () => {
   // Active data type object
   const activeDataType = useMemo<DataType>(() => {
     if (selectedRegion) {
-      const dt = selectedRegion.dataTypes.find(d => d.code === selectedDataType);
+      const dt = selectedRegion.effectiveDataTypes.find(d => d.code === selectedDataType);
       if (dt) return dt;
     }
     return { code: 'wte', name: 'Water Table Elevation', unit: 'ft' };
@@ -846,7 +846,7 @@ const App: React.FC = () => {
       name: newName,
       lengthUnit,
       singleUnit: region.singleUnit,
-      dataTypes: region.dataTypes
+      customDataTypes: region.customDataTypes,
     };
     await fetch('/api/save-data', {
       method: 'POST',
@@ -904,7 +904,7 @@ const App: React.FC = () => {
     }
 
     // Dynamically include all data_*.csv files
-    for (const dt of region.dataTypes) {
+    for (const dt of region.effectiveDataTypes) {
       try {
         const res = await freshFetch(`${basePath}/data_${dt.code}.csv`);
         if (res.ok) {
@@ -986,9 +986,9 @@ const App: React.FC = () => {
     const wellsCsvContent = [wellsCsvHeader, ...wellsCsvRows].join('\n');
 
     // Rebuild data CSVs per data type
-    const dataTypes = region?.dataTypes || [{ code: 'wte', name: 'Water Table Elevation', unit: 'ft' }];
+    const regionDataTypes = region?.effectiveDataTypes || [{ code: 'wte', name: 'Water Table Elevation', unit: 'ft' }];
     const dataFiles: { path: string; content: string }[] = [];
-    for (const dt of dataTypes) {
+    for (const dt of regionDataTypes) {
       const dtMeasurements = regionMeasurements.filter(m => m.dataType === dt.code);
       const header = 'well_id,well_name,date,value,aquifer_id';
       const rows = dtMeasurements.map(m =>
@@ -1140,7 +1140,7 @@ const App: React.FC = () => {
     );
   }
 
-  const hasMultipleDataTypes = selectedRegion && selectedRegion.dataTypes.length > 1;
+  const hasMultipleDataTypes = selectedRegion && selectedRegion.effectiveDataTypes.length > 1;
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 font-sans">
@@ -1265,7 +1265,7 @@ const App: React.FC = () => {
                 }}
                 className="px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                {selectedRegion!.dataTypes.map(dt => (
+                {selectedRegion!.effectiveDataTypes.map(dt => (
                   <option key={dt.code} value={dt.code}>{dt.name} ({dt.unit})</option>
                 ))}
               </select>

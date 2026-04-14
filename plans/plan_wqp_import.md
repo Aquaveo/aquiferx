@@ -820,10 +820,9 @@ Search: [__________________]                     38 parameters, 7 groups
 
 **Access points:**
 1. **DataTypeEditor** → "Browse Catalog" link (for users considering a custom type).
-2. **ImportDataHub** → a "View Catalog" button next to the region card (for users about to import).
-3. **MeasurementImporter** → "View Catalog" link next to the detection panel header.
+2. **MeasurementImporter** → "View Catalog" link next to the detection panel header (for users about to map CSV columns).
 
-All three open the same modal component. Implementation: new file `components/import/CatalogBrowser.tsx` (or a more neutral `components/CatalogBrowser.tsx` since it's used outside of import too).
+Both open the same modal component. Implementation: `components/CatalogBrowser.tsx`.
 
 #### `MeasurementImporter` — column detection becomes a mapping editor
 

@@ -7,7 +7,8 @@ export const mockRegions: Region[] = [
     name: 'Virgin River Basin',
     lengthUnit: 'ft',
     singleUnit: false,
-    dataTypes: [{ code: 'wte', name: 'Water Table Elevation', unit: 'ft' }],
+    customDataTypes: [],
+    effectiveDataTypes: [{ code: 'wte', name: 'Water Table Elevation', unit: 'ft' }],
     bounds: [36.9, -113.6, 37.3, -113.3],
     geojson: {
       type: 'Feature',

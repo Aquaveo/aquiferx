@@ -26,7 +26,13 @@ export interface RegionMeta {
   name: string;
   lengthUnit: 'ft' | 'm';
   singleUnit: boolean;
-  dataTypes: DataType[];
+  /** Non-catalog parameters this region uses (BOD5, etc). Catalog
+   *  parameters appear implicitly when their data file exists. Must not
+   *  collide with any catalog code. */
+  customDataTypes: DataType[];
+  /** Scanned server-side and attached by the /api/regions endpoint — list
+   *  of `data_*.csv` files currently on disk in the region folder. */
+  dataFiles?: string[];
 }
 
 export interface Region {
@@ -34,7 +40,10 @@ export interface Region {
   name: string;
   lengthUnit: 'ft' | 'm';
   singleUnit: boolean;
-  dataTypes: DataType[];
+  customDataTypes: DataType[];
+  /** Effective data type set for this region: WTE + catalog entries that
+   *  have data + custom types that have data. Computed at load time. */
+  effectiveDataTypes: DataType[];
   geojson: any;
   bounds: [number, number, number, number]; // [minLat, minLng, maxLat, maxLng]
 }

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, MapPin, Layers, Navigation, BarChart3, Plus, Settings, Download, Upload, Loader2, CheckCircle2, AlertTriangle, Pencil } from 'lucide-react';
 import JSZip from 'jszip';
-import { RegionMeta, DataType } from '../../types';
+import { RegionMeta, DataType, ParameterCatalog } from '../../types';
 import { freshFetch, saveFiles } from '../../services/importUtils';
+import { loadCatalog, computeEffectiveDataTypes } from '../../services/catalog';
 import RegionImporter from './RegionImporter';
 import AquiferImporter from './AquiferImporter';
 import WellImporter from './WellImporter';
@@ -21,21 +22,37 @@ interface RegionInfo extends RegionMeta {
   aquiferCount: number;
   wellCount: number;
   measurementCounts: Record<string, number>;
+  effectiveDataTypes: DataType[];
   bounds: [number, number, number, number]; // [minLat, minLng, maxLat, maxLng]
 }
 
-async function fetchRegionList(): Promise<RegionInfo[]> {
+async function fetchRegionList(catalog: ParameterCatalog | null): Promise<RegionInfo[]> {
   const res = await fetch('/api/regions');
   if (!res.ok) return [];
-  const metas: RegionMeta[] = await res.json();
+  const rawMetas: any[] = await res.json();
+  // Normalize legacy dataTypes → customDataTypes in memory
+  const metas: RegionMeta[] = rawMetas.map(m => ({
+    id: m.id,
+    name: m.name,
+    lengthUnit: m.lengthUnit || 'ft',
+    singleUnit: !!m.singleUnit,
+    customDataTypes: Array.isArray(m.customDataTypes)
+      ? m.customDataTypes
+      : Array.isArray(m.dataTypes)
+        ? m.dataTypes.filter((dt: DataType) => dt.code !== 'wte')
+        : [],
+    dataFiles: Array.isArray(m.dataFiles) ? m.dataFiles : [],
+  }));
 
   const infos: RegionInfo[] = [];
   for (const meta of metas) {
+    const effectiveDataTypes = computeEffectiveDataTypes(meta, catalog);
     const info: RegionInfo = {
       ...meta,
       aquiferCount: 0,
       wellCount: 0,
       measurementCounts: {},
+      effectiveDataTypes,
       bounds: [0, 0, 0, 0]
     };
 
@@ -86,13 +103,17 @@ async function fetchRegionList(): Promise<RegionInfo[]> {
       }
     } catch {}
 
-    // Count measurements per data type
-    for (const dt of meta.dataTypes || []) {
+    // Count measurements per data type — iterate scanned data files so the
+    // counts reflect disk state, not a stale metadata list.
+    for (const f of meta.dataFiles || []) {
+      const m = /^data_(.+)\.csv$/.exec(f);
+      if (!m) continue;
+      const code = m[1];
       try {
-        const mRes = await freshFetch(`/data/${meta.id}/data_${dt.code}.csv`);
+        const mRes = await freshFetch(`/data/${meta.id}/${f}`);
         if (mRes.ok) {
           const text = await mRes.text();
-          info.measurementCounts[dt.code] = Math.max(0, text.split('\n').filter(l => l.trim()).length - 1);
+          info.measurementCounts[code] = Math.max(0, text.split('\n').filter(l => l.trim()).length - 1);
         }
       } catch {}
     }
@@ -104,6 +125,7 @@ async function fetchRegionList(): Promise<RegionInfo[]> {
 
 const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, initialRegionId }) => {
   const [regionList, setRegionList] = useState<RegionInfo[]>([]);
+  const [catalog, setCatalog] = useState<ParameterCatalog | null>(null);
   const [activeRegionId, setActiveRegionId] = useState<string | null>(initialRegionId || null);
   const [activeWizard, setActiveWizard] = useState<'region' | 'aquifer' | 'well' | 'measurement' | 'datatypes' | null>(null);
   const [showRegionEditor, setShowRegionEditor] = useState(false);
@@ -122,7 +144,14 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
 
   const loadRegions = async () => {
     setIsLoading(true);
-    const list = await fetchRegionList();
+    let cat = catalog;
+    if (!cat) {
+      try {
+        cat = await loadCatalog();
+        setCatalog(cat);
+      } catch {}
+    }
+    const list = await fetchRegionList(cat);
     setRegionList(list);
     setIsLoading(false);
   };
@@ -138,7 +167,7 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
         const prefix = region.id;
         const filesToFetch = [
           'region.json', 'region.geojson', 'aquifers.geojson', 'wells.csv',
-          ...region.dataTypes.map(dt => `data_${dt.code}.csv`)
+          ...(region.dataFiles || []),
         ];
         for (const filename of filesToFetch) {
           try {
@@ -448,9 +477,9 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
                 <h4 className="font-semibold text-slate-700 text-sm">Measurements</h4>
               </div>
               <p className="text-2xl font-bold text-slate-800 mb-1">{totalMeasurements}</p>
-              {activeRegion && activeRegion.dataTypes.length > 0 && (
+              {activeRegion && activeRegion.effectiveDataTypes.length > 0 && (
                 <div className="text-xs text-slate-400 mb-2">
-                  {activeRegion.dataTypes.map(dt => (
+                  {activeRegion.effectiveDataTypes.map(dt => (
                     <span key={dt.code} className="mr-2">
                       {dt.code}: {activeRegion.measurementCounts[dt.code] || 0}
                     </span>
@@ -656,7 +685,8 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
           regionName={activeRegion.name}
           lengthUnit={activeRegion.lengthUnit}
           singleUnit={activeRegion.singleUnit}
-          dataTypes={activeRegion.dataTypes}
+          dataTypes={activeRegion.effectiveDataTypes}
+          customDataTypes={activeRegion.customDataTypes}
           regionBounds={activeRegion.bounds}
           existingWellCount={activeRegion.wellCount}
           onComplete={handleSubWizardComplete}
@@ -668,7 +698,7 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
           regionId={activeRegion.id}
           regionName={activeRegion.name}
           lengthUnit={activeRegion.lengthUnit}
-          dataTypes={activeRegion.dataTypes}
+          customDataTypes={activeRegion.customDataTypes}
           singleUnit={activeRegion.singleUnit}
           onUpdate={() => { loadRegions(); onDataChanged(); }}
           onClose={() => setActiveWizard(null)}
@@ -685,7 +715,7 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
         <AquiferEditor
           regionId={activeRegion.id}
           regionName={activeRegion.name}
-          dataTypes={activeRegion.dataTypes}
+          dataTypes={activeRegion.effectiveDataTypes}
           onSave={() => { loadRegions(); onDataChanged(); }}
           onClose={() => setShowAquiferEditor(false)}
         />

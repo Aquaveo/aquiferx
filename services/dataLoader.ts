@@ -1,7 +1,8 @@
 import shp from 'shpjs';
 import polylabel from 'polylabel';
-import { Region, Aquifer, Well, Measurement, RegionMeta, RasterAnalysisMeta, ImputationModelMeta } from '../types';
+import { Region, Aquifer, Well, Measurement, RegionMeta, RasterAnalysisMeta, ImputationModelMeta, DataType } from '../types';
 import { freshFetch } from './importUtils';
+import { loadCatalog, computeEffectiveDataTypes } from './catalog';
 
 interface DataFolder {
   name: string;
@@ -178,13 +179,29 @@ async function loadRegionManifest(): Promise<RegionMeta[]> {
   try {
     const response = await freshFetch('/api/regions');
     if (response.ok) {
-      return await response.json();
+      const raw = await response.json();
+      // Migrate old shape (dataTypes) → new shape (customDataTypes) in memory
+      // so consumers never see the legacy field. The disk files are handled
+      // separately by the migration step.
+      return (raw as any[]).map((m: any): RegionMeta => ({
+        id: m.id,
+        name: m.name,
+        lengthUnit: m.lengthUnit || 'ft',
+        singleUnit: !!m.singleUnit,
+        customDataTypes: Array.isArray(m.customDataTypes)
+          ? m.customDataTypes
+          : Array.isArray(m.dataTypes)
+            ? m.dataTypes.filter((dt: DataType) => dt.code !== 'wte')
+            : [],
+        dataFiles: Array.isArray(m.dataFiles) ? m.dataFiles : [],
+      }));
     }
   } catch (e) {
     console.warn('Could not load regions from API:', e);
   }
   return [];
 }
+
 
 // Load aquifers for a region from aquifers.geojson
 // GeoJSON should have standardized properties: aquifer_id, aquifer_name
@@ -378,6 +395,14 @@ export async function loadAllData(): Promise<{
 }> {
   const regionMetas = await loadRegionManifest();
 
+  // Load the catalog so we can compute each region's effective type list
+  let catalog = null;
+  try {
+    catalog = await loadCatalog();
+  } catch (e) {
+    console.warn('Could not load parameter catalog:', e);
+  }
+
   const regions: Region[] = [];
   const allAquifers: Aquifer[] = [];
   const allWells: Well[] = [];
@@ -387,6 +412,7 @@ export async function loadAllData(): Promise<{
 
   for (const meta of regionMetas) {
     const folderPath = `/data/${meta.id}`;
+    const effectiveDataTypes = computeEffectiveDataTypes(meta, catalog);
 
     // Load region boundary from region.geojson
     try {
@@ -399,7 +425,8 @@ export async function loadAllData(): Promise<{
           name: meta.name,
           lengthUnit: meta.lengthUnit || 'ft',
           singleUnit: meta.singleUnit || false,
-          dataTypes: meta.dataTypes || [{ code: 'wte', name: 'Water Table Elevation', unit: meta.lengthUnit || 'ft' }],
+          customDataTypes: meta.customDataTypes || [],
+          effectiveDataTypes,
           geojson: geojson.type === 'FeatureCollection' ? geojson : { type: 'FeatureCollection', features: [geojson] },
           bounds
         });
@@ -416,9 +443,8 @@ export async function loadAllData(): Promise<{
     const aquifers = await loadAquifers(meta.id, folderPath, wells);
     for (const a of aquifers) allAquifers.push(a);
 
-    // Load measurements from all data type CSVs
-    const dataTypes = meta.dataTypes || [{ code: 'wte', name: 'Water Table Elevation', unit: meta.lengthUnit || 'ft' }];
-    const measurements = await loadMeasurements(folderPath, meta.id, dataTypes);
+    // Load measurements from all effective data type CSVs
+    const measurements = await loadMeasurements(folderPath, meta.id, effectiveDataTypes);
     for (const m of measurements) allMeasurements.push(m);
 
     // Load storage analysis metadata

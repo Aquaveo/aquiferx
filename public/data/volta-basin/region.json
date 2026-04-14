@@ -3,11 +3,5 @@
   "name": "Volta Basin",
   "lengthUnit": "m",
   "singleUnit": false,
-  "dataTypes": [
-    {
-      "code": "wte",
-      "name": "Water Table Elevation",
-      "unit": "m"
-    }
-  ]
+  "customDataTypes": []
 }

@@ -72,7 +72,7 @@ const RegionImporter: React.FC<RegionImporterProps> = ({ existingRegionIds, onCo
         name: regionName,
         lengthUnit,
         singleUnit,
-        dataTypes: [{ code: 'wte', name: 'Water Table Elevation', unit: lengthUnit }]
+        customDataTypes: [],
       };
 
       const files: { path: string; content: string }[] = [
