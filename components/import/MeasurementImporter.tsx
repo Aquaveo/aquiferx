@@ -12,7 +12,6 @@ import {
   ExistingWell,
   MatchResult,
   MatchSummary,
-  ColumnSuggestion,
 } from '../../services/wellMatching';
 import { fetchGseBatch } from '../../services/gseLookup';
 import ColumnMapperModal from './ColumnMapperModal';
@@ -107,7 +106,6 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   const [aquifersGeojson, setAquifersGeojson] = useState<any>(null);
   const [catalog, setCatalog] = useState<ParameterCatalog | null>(null);
   const [otherRegionTypes, setOtherRegionTypes] = useState<DataType[]>([]);
-  const [columnSuggestions, setColumnSuggestions] = useState<ColumnSuggestion[]>([]);
   const [matchResults, setMatchResults] = useState<MatchResult[] | null>(null);
   const [matchSummary, setMatchSummary] = useState<MatchSummary | null>(null);
   const [proximityMeters, setProximityMeters] = useState(100);
@@ -263,56 +261,181 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     }
   };
 
-  // Auto-detect data-type candidates from CSV headers whenever a file lands
-  useEffect(() => {
-    if (!file || dataSource !== 'upload') { setColumnSuggestions([]); return; }
-    const suggestions = suggestDataTypesFromColumns(file.columns, catalog, dataTypes, otherRegionTypes);
-    // If multi-type is on, pre-include all non-custom matches so the user
-    // sees how the auto-suggestions line up with their type selection.
-    setColumnSuggestions(suggestions);
-  }, [file?.columns, catalog, dataTypes, otherRegionTypes, dataSource]);
+  // --- Per-column mapping editor (Phase 3.5d) ------------------------
+  // Each CSV column that isn't a well_id/date/lat/etc. gets a mapping row
+  // with an explicit Target. Users can override the auto-match to handle
+  // typos and variant spellings, or opt out of columns entirely.
 
-  const toggleSuggestion = (column: string) => {
-    setColumnSuggestions(prev => prev.map(s => s.column === column ? { ...s, include: !s.include } : s));
-  };
+  type MappingTarget =
+    | { kind: 'catalog'; code: string }
+    | { kind: 'existingCustom'; code: string }
+    | { kind: 'new'; code: string; name: string; unit: string };
 
-  const updateSuggestionUnit = (column: string, unit: string) => {
-    setColumnSuggestions(prev => prev.map(s => s.column === column ? { ...s, unit } : s));
-  };
+  interface ColumnMapping {
+    column: string;
+    headerUnit: string | null;
+    include: boolean;
+    target: MappingTarget;
+  }
 
-  // Accepted suggestions that will be added to the region + used for the import
-  const acceptedSuggestions = useMemo(
-    () => columnSuggestions.filter(s => s.include),
-    [columnSuggestions]
+  const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>([]);
+
+  const catalogCodes = useMemo(
+    () => new Set(Object.keys(catalog?.parameters || {})),
+    [catalog]
   );
 
-  // Custom (non-catalog) data types accepted via the detection panel that
-  // don't yet exist in the region's customDataTypes list. Catalog matches
-  // don't need to be "added" — they appear automatically once the data file
-  // is written on disk.
-  const newCustomTypesToAdd = useMemo(() => {
-    const existingCustom = new Set(customDataTypes.map(d => d.code));
-    return acceptedSuggestions
-      .filter(s => s.source === 'custom' && !existingCustom.has(s.code))
-      .map<DataType>(s => ({ code: s.code, name: s.name, unit: s.unit }));
-  }, [acceptedSuggestions, customDataTypes]);
-
-  // Apply accepted suggestions to typeColumnMapping + selectedTypes when user
-  // is in multi-type mode. In single-type mode we just leave the suggestions
-  // as guidance and the user picks one "value" column manually.
+  // Derive initial mappings from auto-match when the file or catalog changes
   useEffect(() => {
-    if (!isMultiType) return;
-    if (acceptedSuggestions.length === 0) return;
-    const newMapping: Record<string, string> = { ...typeColumnMapping };
-    const codes = new Set(selectedTypes);
-    for (const s of acceptedSuggestions) {
-      newMapping[s.code] = s.column;
-      codes.add(s.code);
+    if (!file || dataSource !== 'upload') { setColumnMappings([]); return; }
+    const suggestions = suggestDataTypesFromColumns(file.columns, catalog, customDataTypes, otherRegionTypes);
+    const initial: ColumnMapping[] = suggestions.map(s => {
+      let target: MappingTarget;
+      if (s.source === 'catalog') {
+        target = { kind: 'catalog', code: s.code };
+      } else if (s.source === 'existingCustom') {
+        target = { kind: 'existingCustom', code: s.code };
+      } else {
+        // otherRegionCustom or custom: treat as a new custom, carry prefilled values
+        target = { kind: 'new', code: s.code, name: s.name, unit: s.unit };
+      }
+      return {
+        column: s.column,
+        headerUnit: s.headerUnit,
+        include: s.include,
+        target,
+      };
+    });
+    setColumnMappings(initial);
+  }, [file?.columns, catalog, customDataTypes, otherRegionTypes, dataSource]);
+
+  const setMappingInclude = (column: string, include: boolean) => {
+    setColumnMappings(prev => prev.map(m => m.column === column ? { ...m, include } : m));
+  };
+
+  // Handle Target dropdown change. The value encodes kind + code:
+  //   "catalog:nitrate", "existingCustom:bod5", "new"
+  const setMappingTarget = (column: string, value: string) => {
+    setColumnMappings(prev => prev.map(m => {
+      if (m.column !== column) return m;
+      if (value.startsWith('catalog:')) {
+        return { ...m, target: { kind: 'catalog', code: value.slice('catalog:'.length) } };
+      }
+      if (value.startsWith('existingCustom:')) {
+        return { ...m, target: { kind: 'existingCustom', code: value.slice('existingCustom:'.length) } };
+      }
+      if (value === 'new') {
+        // Seed from the column header if we don't already have new-custom values
+        if (m.target.kind === 'new') return m;
+        const slug = m.column.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 20) || 'custom';
+        return {
+          ...m,
+          target: { kind: 'new', code: slug, name: m.column, unit: m.headerUnit || '' },
+        };
+      }
+      return m;
+    }));
+  };
+
+  const updateNewCustom = (column: string, field: 'code' | 'name' | 'unit', value: string) => {
+    setColumnMappings(prev => prev.map(m => {
+      if (m.column !== column || m.target.kind !== 'new') return m;
+      return { ...m, target: { ...m.target, [field]: value } };
+    }));
+  };
+
+  const setAllMappingsInclude = (filter: 'all' | 'catalogOnly' | 'none') => {
+    setColumnMappings(prev => prev.map(m => {
+      if (filter === 'none') return { ...m, include: false };
+      if (filter === 'all') return { ...m, include: true };
+      // catalogOnly
+      return { ...m, include: m.target.kind === 'catalog' };
+    }));
+  };
+
+  // Resolve the effective DataType for a mapping — the thing that drives
+  // the resulting data_{code}.csv file.
+  const mappingResolvedType = (m: ColumnMapping): DataType | null => {
+    if (m.target.kind === 'catalog') {
+      const param = catalog?.parameters[m.target.code];
+      if (!param) return null;
+      return { code: m.target.code, name: param.name, unit: param.unit };
     }
+    if (m.target.kind === 'existingCustom') {
+      const dt = customDataTypes.find(d => d.code === m.target.code);
+      if (!dt) return null;
+      return dt;
+    }
+    // new
+    return { code: m.target.code, name: m.target.name, unit: m.target.unit };
+  };
+
+  const includedMappings = useMemo(
+    () => columnMappings.filter(m => m.include),
+    [columnMappings]
+  );
+
+  // Custom types that will be newly added to the region's customDataTypes
+  // (distinct codes from rows whose target is 'new' and whose code isn't
+  // already a custom or a catalog entry).
+  const newCustomTypesToAdd = useMemo(() => {
+    const existing = new Set(customDataTypes.map(d => d.code));
+    const seen = new Set<string>();
+    const result: DataType[] = [];
+    for (const m of includedMappings) {
+      if (m.target.kind !== 'new') continue;
+      if (!m.target.code) continue;
+      if (existing.has(m.target.code)) continue;
+      if (catalogCodes.has(m.target.code)) continue; // collision prevented by UI validation
+      if (seen.has(m.target.code)) continue;
+      seen.add(m.target.code);
+      result.push({ code: m.target.code, name: m.target.name || m.target.code, unit: m.target.unit });
+    }
+    return result;
+  }, [includedMappings, customDataTypes, catalogCodes]);
+
+  // Keep typeColumnMapping + selectedTypes in sync with the included mappings
+  // so doSave's existing multi-type path can consume them directly.
+  useEffect(() => {
+    if (includedMappings.length === 0) return;
+    const newMapping: Record<string, string> = { ...typeColumnMapping };
+    const codes: string[] = [];
+    for (const m of includedMappings) {
+      const type = mappingResolvedType(m);
+      if (!type || !type.code) continue;
+      newMapping[type.code] = m.column;
+      if (!codes.includes(type.code)) codes.push(type.code);
+    }
+    if (codes.length === 0) return;
     setTypeColumnMapping(newMapping);
-    setSelectedTypes(Array.from(codes));
+    setSelectedTypes(codes);
+    // Auto-enable multi-type when we have 2+ included mappings so doSave
+    // iterates them as separate data files. Single-column imports can use
+    // either path since the multi-type loop handles length=1 the same way.
+    if (codes.length > 1 && !isMultiType) setIsMultiType(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMultiType, acceptedSuggestions]);
+  }, [includedMappings]);
+
+  // Validation: a new-custom row is invalid when its code collides with
+  // the catalog. UI blocks save when any row has this error.
+  const mappingErrors = useMemo(() => {
+    const errs: Record<string, string> = {};
+    for (const m of columnMappings) {
+      if (!m.include || m.target.kind !== 'new') continue;
+      if (!m.target.code) { errs[m.column] = 'Code required'; continue; }
+      if (!/^[a-z0-9_]{1,20}$/.test(m.target.code)) {
+        errs[m.column] = 'Code must be lowercase alphanumeric + underscore, max 20 chars';
+        continue;
+      }
+      if (catalogCodes.has(m.target.code)) {
+        errs[m.column] = `"${m.target.code}" is a catalog code — pick the catalog entry instead`;
+        continue;
+      }
+    }
+    return errs;
+  }, [columnMappings, catalogCodes]);
+
+  const hasMappingErrors = Object.keys(mappingErrors).length > 0;
 
   const updateMapping = (key: string, value: string) => {
     if (!file) return;
@@ -914,7 +1037,8 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     (isMultiType ? selectedTypes.every(code => typeColumnMapping[code]) : file.mapping['value']) &&
     selectedTypes.length > 0 &&
     (singleUnit || aquiferAssignment !== 'single' || selectedAquiferId) &&
-    (!unmatchedInfo || unmatchedInfo.matchedCount > 0 || hasMatchResults);
+    (!unmatchedInfo || unmatchedInfo.matchedCount > 0 || hasMatchResults) &&
+    !hasMappingErrors;
 
   return (
     <div className="fixed inset-0 z-[105] flex items-center justify-center bg-black/40" onClick={onClose}>
@@ -1208,13 +1332,13 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           </div>
         )}
 
-        {/* Detected data types panel — only in upload flow with catalog-loaded suggestions */}
-        {file && dataSource === 'upload' && columnSuggestions.length > 0 && (
+        {/* Detected data types panel — per-column mapping editor */}
+        {file && dataSource === 'upload' && columnMappings.length > 0 && (
           <div className="mb-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <Wand2 size={14} className="text-indigo-600" />
-                <span className="text-sm font-medium text-indigo-800">Detected data columns</span>
+                <span className="text-sm font-medium text-indigo-800">Map data columns</span>
               </div>
               <button
                 onClick={() => setShowCatalogBrowser(true)}
@@ -1224,40 +1348,102 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
               </button>
             </div>
             <p className="text-xs text-indigo-700 mb-3">
-              We found columns that look like measurement types. Check the ones you want to import — new types will be added to this region on save.
+              Each column from your CSV that looks like measurement data is listed below. Pick a target for each — a catalog parameter, an existing custom type, or a new custom. Uncheck anything you don't want to import.
             </p>
-            <div className="space-y-1 max-h-56 overflow-y-auto">
-              {columnSuggestions.map(s => (
-                <div key={s.column} className="flex items-center gap-2 py-1 border-b border-indigo-100 last:border-0">
-                  <input
-                    type="checkbox"
-                    checked={s.include}
-                    onChange={() => toggleSuggestion(s.column)}
-                    className="text-indigo-600 rounded"
-                  />
-                  <span className="flex-1 text-xs text-slate-700">
-                    <span className="font-mono text-indigo-700">{s.column}</span>
-                    <span className="text-slate-400"> → </span>
-                    <span className="font-medium">{s.name}</span>
-                    <span className="font-mono text-slate-400"> ({s.code})</span>
-                  </span>
-                  <input
-                    type="text"
-                    value={s.unit}
-                    onChange={e => updateSuggestionUnit(s.column, e.target.value)}
-                    placeholder="unit"
-                    className="w-16 px-1.5 py-0.5 border border-indigo-200 rounded text-xs"
-                  />
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                    s.source === 'catalog' ? 'bg-blue-100 text-blue-700' :
-                    s.source === 'existing' ? 'bg-green-100 text-green-700' :
-                    s.source === 'otherRegion' ? 'bg-purple-100 text-purple-700' :
-                    'bg-slate-200 text-slate-600'
-                  }`}>
-                    {s.source === 'catalog' ? 'catalog' : s.source === 'existing' ? 'in region' : s.source === 'otherRegion' ? 'other region' : 'custom'}
-                  </span>
-                </div>
-              ))}
+            <div className="flex items-center gap-2 mb-3 text-xs">
+              <span className="text-slate-500">Bulk:</span>
+              <button onClick={() => setAllMappingsInclude('all')} className="px-2 py-0.5 bg-white border border-indigo-200 rounded hover:bg-indigo-100 text-indigo-700">Include all</button>
+              <button onClick={() => setAllMappingsInclude('catalogOnly')} className="px-2 py-0.5 bg-white border border-indigo-200 rounded hover:bg-indigo-100 text-indigo-700">Only catalog matches</button>
+              <button onClick={() => setAllMappingsInclude('none')} className="px-2 py-0.5 bg-white border border-indigo-200 rounded hover:bg-indigo-100 text-indigo-700">None</button>
+            </div>
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {columnMappings.map(m => {
+                const resolved = mappingResolvedType(m);
+                const targetValue = m.target.kind === 'catalog'
+                  ? `catalog:${m.target.code}`
+                  : m.target.kind === 'existingCustom'
+                    ? `existingCustom:${m.target.code}`
+                    : 'new';
+                const unitMismatch = m.target.kind === 'catalog' && m.headerUnit && resolved && m.headerUnit.toLowerCase() !== resolved.unit.toLowerCase();
+                const err = mappingErrors[m.column];
+                return (
+                  <div key={m.column} className={`p-2 rounded border ${m.include ? 'border-indigo-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-70'}`}>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={m.include}
+                        onChange={e => setMappingInclude(m.column, e.target.checked)}
+                        className="text-indigo-600 rounded"
+                      />
+                      <span className="flex-1 text-xs font-mono text-slate-700 truncate" title={m.column}>{m.column}</span>
+                      <select
+                        value={targetValue}
+                        onChange={e => setMappingTarget(m.column, e.target.value)}
+                        className="text-xs px-2 py-1 border border-slate-300 rounded bg-white max-w-[180px]"
+                      >
+                        <optgroup label="Catalog parameters">
+                          {catalog && Object.keys(catalog.parameters)
+                            .sort((a, b) => catalog.parameters[a].name.localeCompare(catalog.parameters[b].name))
+                            .map(code => (
+                              <option key={code} value={`catalog:${code}`}>{catalog.parameters[code].name}</option>
+                            ))}
+                        </optgroup>
+                        {customDataTypes.length > 0 && (
+                          <optgroup label="Region custom types">
+                            {customDataTypes.map(dt => (
+                              <option key={dt.code} value={`existingCustom:${dt.code}`}>{dt.name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        <optgroup label="Other">
+                          <option value="new">+ New custom type</option>
+                        </optgroup>
+                      </select>
+                      {/* Unit display */}
+                      {m.target.kind === 'catalog' && resolved && (
+                        <span className="text-xs text-slate-500 min-w-[3rem] text-right">{resolved.unit || '—'}</span>
+                      )}
+                      {m.target.kind === 'existingCustom' && resolved && (
+                        <span className="text-xs text-slate-500 min-w-[3rem] text-right">{resolved.unit || '—'}</span>
+                      )}
+                    </div>
+                    {/* Warnings / errors / badges */}
+                    {unitMismatch && (
+                      <p className="mt-1 ml-6 text-[11px] text-amber-700">
+                        header says <span className="font-mono">{m.headerUnit}</span>, catalog is <span className="font-mono">{resolved?.unit}</span> — verify your values before importing
+                      </p>
+                    )}
+                    {m.target.kind === 'new' && (
+                      <div className="mt-1 ml-6 space-y-1">
+                        <div className="flex gap-2 items-center text-xs">
+                          <label className="text-slate-500 w-10">Code</label>
+                          <input
+                            value={m.target.code}
+                            onChange={e => updateNewCustom(m.column, 'code', e.target.value)}
+                            className="flex-1 px-2 py-0.5 border border-slate-300 rounded font-mono"
+                            placeholder="e.g. bod5"
+                          />
+                          <label className="text-slate-500 w-8">Name</label>
+                          <input
+                            value={m.target.name}
+                            onChange={e => updateNewCustom(m.column, 'name', e.target.value)}
+                            className="flex-1 px-2 py-0.5 border border-slate-300 rounded"
+                            placeholder="e.g. BOD5"
+                          />
+                          <label className="text-slate-500 w-8">Unit</label>
+                          <input
+                            value={m.target.unit}
+                            onChange={e => updateNewCustom(m.column, 'unit', e.target.value)}
+                            className="w-16 px-2 py-0.5 border border-slate-300 rounded"
+                            placeholder="mg/L"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {err && <p className="mt-1 ml-6 text-[11px] text-red-600">{err}</p>}
+                  </div>
+                );
+              })}
             </div>
             {newCustomTypesToAdd.length > 0 && (
               <p className="text-xs text-indigo-700 mt-2">

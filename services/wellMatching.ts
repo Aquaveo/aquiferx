@@ -159,13 +159,17 @@ export function summarizeMatches(results: MatchResult[]): MatchSummary {
 
 // -------- Column → data type suggestion --------
 
-export type SuggestionSource = 'catalog' | 'existing' | 'otherRegion' | 'custom';
+export type SuggestionSource = 'catalog' | 'existingCustom' | 'otherRegionCustom' | 'custom';
 
 export interface ColumnSuggestion {
   column: string;
   code: string;
   name: string;
   unit: string;
+  /** Unit string parsed from the CSV header like "(mg/L)", or null when the
+   *  header carried no unit hint. Used by the importer to warn on unit
+   *  mismatches against catalog entries. */
+  headerUnit: string | null;
   source: SuggestionSource;
   include: boolean;
 }
@@ -206,17 +210,17 @@ function slugCode(s: string): string {
 export function suggestDataTypesFromColumns(
   columns: string[],
   catalog: ParameterCatalog | null,
-  regionDataTypes: DataType[],
-  otherRegionDataTypes: DataType[]
+  regionCustomDataTypes: DataType[],
+  otherRegionCustomDataTypes: DataType[]
 ): ColumnSuggestion[] {
   const catalogIdx = catalog ? buildCatalogIndex(catalog) : new Map();
-  const regionByName = new Map<string, DataType>();
-  for (const dt of regionDataTypes) {
-    regionByName.set(normalizeName(dt.name), dt);
-    regionByName.set(normalizeName(dt.code), dt);
+  const regionCustomByName = new Map<string, DataType>();
+  for (const dt of regionCustomDataTypes) {
+    regionCustomByName.set(normalizeName(dt.name), dt);
+    regionCustomByName.set(normalizeName(dt.code), dt);
   }
   const otherByName = new Map<string, DataType>();
-  for (const dt of otherRegionDataTypes) {
+  for (const dt of otherRegionCustomDataTypes) {
     if (!otherByName.has(normalizeName(dt.name))) otherByName.set(normalizeName(dt.name), dt);
     if (!otherByName.has(normalizeName(dt.code))) otherByName.set(normalizeName(dt.code), dt);
   }
@@ -228,42 +232,60 @@ export function suggestDataTypesFromColumns(
     const norm = normalizeName(base);
     if (!norm) continue;
 
-    // 1. Region's existing types (use as-is, preserves region overrides)
-    const regionHit = regionByName.get(norm);
-    if (regionHit) {
-      suggestions.push({ column: col, code: regionHit.code, name: regionHit.name, unit: regionHit.unit, source: 'existing', include: true });
-      continue;
-    }
-
-    // 2. Catalog (exact-normalized)
+    // 1. Catalog — authoritative for standard parameters
     const catHit = catalogIdx.get(norm) || findSubstringCatalogMatch(norm, catalogIdx);
     if (catHit) {
       suggestions.push({
         column: col,
         code: catHit.code,
         name: catHit.param.name,
-        unit: unit || catHit.param.unit,
+        unit: catHit.param.unit, // catalog unit wins for catalog targets
+        headerUnit: unit,
         source: 'catalog',
         include: true,
       });
       continue;
     }
 
-    // 3. Other regions' custom types
-    const otherHit = otherByName.get(norm);
-    if (otherHit) {
-      suggestions.push({ column: col, code: otherHit.code, name: otherHit.name, unit: unit || otherHit.unit, source: 'otherRegion', include: true });
+    // 2. Region's existing custom types (non-catalog, defined in customDataTypes)
+    const customHit = regionCustomByName.get(norm);
+    if (customHit) {
+      suggestions.push({
+        column: col,
+        code: customHit.code,
+        name: customHit.name,
+        unit: customHit.unit,
+        headerUnit: unit,
+        source: 'existingCustom',
+        include: true,
+      });
       continue;
     }
 
-    // 4. Custom fallback
+    // 3. Other regions' custom types (seed for importing to this region)
+    const otherHit = otherByName.get(norm);
+    if (otherHit) {
+      suggestions.push({
+        column: col,
+        code: otherHit.code,
+        name: otherHit.name,
+        unit: unit || otherHit.unit,
+        headerUnit: unit,
+        source: 'otherRegionCustom',
+        include: true,
+      });
+      continue;
+    }
+
+    // 4. Custom fallback — unmatched, default off
     suggestions.push({
       column: col,
       code: slugCode(base),
       name: base,
       unit: unit || '',
+      headerUnit: unit,
       source: 'custom',
-      include: false, // default off — user should opt in for unmatched columns
+      include: false,
     });
   }
   return suggestions;
