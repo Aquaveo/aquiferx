@@ -14,14 +14,9 @@ import {
   MatchSummary,
 } from '../../services/wellMatching';
 import { fetchGseBatch } from '../../services/gseLookup';
-import {
-  reprojectPoint,
-  COMMON_CRS_OPTIONS,
-  fetchEpsgDefinition,
-  autoDetectCrs,
-  normalizeEpsgCode,
-  SampleCoord,
-} from '../../services/reprojection';
+import { SampleCoord } from '../../services/reprojection';
+import { useCrsPicker } from '../../hooks/useCrsPicker';
+import CrsPickerPanel from './CrsPickerPanel';
 import ColumnMapperModal from './ColumnMapperModal';
 import ConfirmDialog from './ConfirmDialog';
 import { DataType, ParameterCatalog, RegionMeta } from '../../types';
@@ -113,16 +108,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   // Toggle: does the CSV include per-row well locations (name / lat / lng)?
   // Default ON when the region has no wells (bootstrap case), off otherwise.
   const [hasWellColumns, setHasWellColumns] = useState(existingWellCount === 0);
-  // CRS of the lat/long values in the CSV. Default WGS84; user can pick a
-  // projected CRS (e.g. EPSG:3448 for Jamaica Metric Grid) to have the
-  // importer reproject coordinates into WGS84 during matching.
-  const [coordinateCrs, setCoordinateCrs] = useState<string>('EPSG:4326');
-  const [crsName, setCrsName] = useState<string>('WGS84 — latitude / longitude');
-  const [crsInputMode, setCrsInputMode] = useState<'preset' | 'epsg'>('preset');
-  const [epsgCodeInput, setEpsgCodeInput] = useState('');
-  const [crsLookupError, setCrsLookupError] = useState('');
-  const [isLookingUpCrs, setIsLookingUpCrs] = useState(false);
-  const [isAutoDetecting, setIsAutoDetecting] = useState(false);
+  // CRS picker (managed via useCrsPicker; see below where the hook is called)
   const [existingWellsFull, setExistingWellsFull] = useState<ExistingWell[]>([]);
   const [aquifersGeojson, setAquifersGeojson] = useState<any>(null);
   const [catalog, setCatalog] = useState<ParameterCatalog | null>(null);
@@ -611,9 +597,9 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     setIsTrimmed(true);
   };
 
-  // Pull the first N parseable (lat, lng) pairs from the CSV as raw numeric
-  // SampleCoord entries. Used by the CRS preview and auto-detect paths.
-  const buildSampleCoords = (limit = 5): SampleCoord[] => {
+  // Sample coordinates for the CRS picker — memoized by mapping + data
+  // reference so the hook's preview only refreshes when the CSV changes.
+  const crsSamples = useMemo<SampleCoord[]>(() => {
     if (!file) return [];
     const latCol = file.mapping['lat'];
     const longCol = file.mapping['long'];
@@ -623,118 +609,17 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
       const x = parseFloat(r[longCol]);
       const y = parseFloat(r[latCol]);
       if (!isNaN(x) && !isNaN(y)) out.push({ x, y });
-      if (out.length >= limit) break;
+      if (out.length >= 5) break;
     }
     return out;
-  };
+  }, [file?.mapping, file?.data]);
 
-  const handleCrsPresetChange = (value: string) => {
-    setCrsLookupError('');
-    setMatchResults(null);
-    setMatchSummary(null);
-    if (value === '__epsg__') {
-      setCrsInputMode('epsg');
-      return;
-    }
-    setCrsInputMode('preset');
-    setCoordinateCrs(value);
-    const opt = COMMON_CRS_OPTIONS.find(o => o.code === value);
-    setCrsName(opt?.label || value);
-  };
-
-  const handleEpsgLookup = async () => {
-    const code = normalizeEpsgCode(epsgCodeInput);
-    if (!code) {
-      setCrsLookupError('Enter a numeric EPSG code, e.g. 3448');
-      return;
-    }
-    setCrsLookupError('');
-    setIsLookingUpCrs(true);
-    try {
-      const def = await fetchEpsgDefinition(code);
-      if (!def) {
-        setCrsLookupError(`Could not resolve ${code}. Check the code and your network.`);
-        return;
-      }
-      setCoordinateCrs(def.code);
-      setCrsName(`${def.code} — ${def.name}`);
-      setMatchResults(null);
-      setMatchSummary(null);
-    } finally {
-      setIsLookingUpCrs(false);
-    }
-  };
-
-  const handleAutoDetectCrs = async () => {
-    const samples = buildSampleCoords(5);
-    if (samples.length === 0) {
-      setCrsLookupError('No coordinate samples — map the latitude and longitude columns first.');
-      return;
-    }
-    setCrsLookupError('');
-    setIsAutoDetecting(true);
-    try {
-      const [minLat, minLng, maxLat, maxLng] = regionBounds;
-      const result = await autoDetectCrs(samples, { minLat, minLng, maxLat, maxLng });
-      if (!result) {
-        setCrsLookupError(
-          'Could not auto-detect a CRS. Your coordinates do not match any common system for this region — check your CSV or enter an EPSG code manually.'
-        );
-        return;
-      }
-      setCoordinateCrs(result.crs);
-      setCrsName(result.name);
-      setMatchResults(null);
-      setMatchSummary(null);
-      setCrsInputMode('preset');
-    } finally {
-      setIsAutoDetecting(false);
-    }
-  };
-
-  // Preview: reproject the first sample row and check if it lands inside
-  // a buffered region box. Used to give the user quick feedback on whether
-  // the selected CRS is plausible.
-  const crsPreview = useMemo(() => {
-    const samples = buildSampleCoords(1);
-    if (samples.length === 0) return null;
-    const { x, y } = samples[0];
-    const out = reprojectPoint(x, y, coordinateCrs);
-    if (!out) return { ok: false as const, text: 'Could not reproject with this CRS.' };
-    const [lng, lat] = out;
-    const [minLat, minLng, maxLat, maxLng] = regionBounds;
-    const dLat = Math.max(0.1, (maxLat - minLat) * 2);
-    const dLng = Math.max(0.1, (maxLng - minLng) * 2);
-    const inside =
-      lat >= minLat - dLat && lat <= maxLat + dLat &&
-      lng >= minLng - dLng && lng <= maxLng + dLng;
-    return {
-      ok: inside,
-      text: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file?.mapping, file?.data, coordinateCrs, regionBounds]);
-
-  // Parse raw lat/lng values from a CSV row into WGS84 decimal degrees,
-  // reprojecting via the selected coordinateCrs if needed. Returns
-  // { lat, lng } or { lat: undefined, lng: undefined } when the input
-  // can't be parsed or falls outside the valid WGS84 range.
-  const parseRowCoords = (latRaw: string | undefined, lngRaw: string | undefined): { lat: number | undefined; lng: number | undefined } => {
-    if (!latRaw || !lngRaw) return { lat: undefined, lng: undefined };
-    const rawLat = parseFloat(latRaw);
-    const rawLng = parseFloat(lngRaw);
-    if (isNaN(rawLat) || isNaN(rawLng)) return { lat: undefined, lng: undefined };
-    // Note: proj4 uses (x, y) = (easting/longitude, northing/latitude)
-    // so we pass the "longitude-like" value first.
-    const reprojected = reprojectPoint(rawLng, rawLat, coordinateCrs);
-    if (!reprojected) return { lat: undefined, lng: undefined };
-    const [lng, lat] = reprojected;
-    if (!isFinite(lat) || !isFinite(lng)) return { lat: undefined, lng: undefined };
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      return { lat: undefined, lng: undefined };
-    }
-    return { lat, lng };
-  };
+  const crs = useCrsPicker({
+    regionBounds,
+    samples: crsSamples,
+    onCrsChange: () => { setMatchResults(null); setMatchSummary(null); },
+  });
+  const { parseRowCoords } = crs;
 
   // Build SourceWellRow[] by deduplicating the CSV on well identity.
   // One match decision per unique well, not per measurement row.
@@ -1806,66 +1691,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
             {/* Coordinate reference system picker */}
             <div className="mb-3 pb-3 border-b border-sky-200">
-              <label className="text-xs text-slate-600 block mb-1">Coordinate system</label>
-              {crsInputMode === 'preset' ? (
-                <div className="flex items-center gap-2">
-                  <select
-                    value={COMMON_CRS_OPTIONS.some(o => o.code === coordinateCrs) ? coordinateCrs : '__other__'}
-                    onChange={e => {
-                      if (e.target.value === '__other__') return;
-                      handleCrsPresetChange(e.target.value);
-                    }}
-                    className="flex-1 px-2 py-1 border border-sky-200 rounded text-xs bg-white"
-                  >
-                    {COMMON_CRS_OPTIONS.map(o => (
-                      <option key={o.code} value={o.code}>{o.label}</option>
-                    ))}
-                    {!COMMON_CRS_OPTIONS.some(o => o.code === coordinateCrs) && (
-                      <option value="__other__">{crsName}</option>
-                    )}
-                    <option value="__epsg__">Enter EPSG code…</option>
-                  </select>
-                  <button
-                    onClick={handleAutoDetectCrs}
-                    disabled={isAutoDetecting}
-                    className="px-2 py-1 bg-white border border-sky-200 rounded text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-50 flex items-center gap-1"
-                  >
-                    {isAutoDetecting && <Loader2 size={10} className="animate-spin" />}
-                    Auto-detect
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={epsgCodeInput}
-                    onChange={e => setEpsgCodeInput(e.target.value)}
-                    placeholder="e.g. 3448"
-                    className="flex-1 px-2 py-1 border border-sky-200 rounded text-xs"
-                  />
-                  <button
-                    onClick={handleEpsgLookup}
-                    disabled={isLookingUpCrs || !epsgCodeInput.trim()}
-                    className="px-2 py-1 bg-sky-600 text-white rounded text-xs font-medium hover:bg-sky-700 disabled:opacity-50 flex items-center gap-1"
-                  >
-                    {isLookingUpCrs && <Loader2 size={10} className="animate-spin" />}
-                    Look up
-                  </button>
-                  <button
-                    onClick={() => { setCrsInputMode('preset'); setCrsLookupError(''); }}
-                    className="text-xs text-slate-500 hover:text-slate-700"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-              {crsLookupError && <p className="text-xs text-red-600 mt-1">{crsLookupError}</p>}
-              {crsPreview && (
-                <p className={`text-xs mt-1 ${crsPreview.ok ? 'text-green-700' : 'text-amber-700'}`}>
-                  {crsPreview.ok ? '✓' : '✗'} Preview: first row → {crsPreview.text}
-                  {crsPreview.ok ? ' (inside region)' : ' — outside region, try a different CRS or Auto-detect'}
-                </p>
-              )}
+              <CrsPickerPanel crs={crs} />
             </div>
 
             <div className="flex items-center gap-2 mb-3">
