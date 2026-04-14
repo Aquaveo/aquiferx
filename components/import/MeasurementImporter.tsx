@@ -102,6 +102,9 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   const [rawUSGSMeasurements, setRawUSGSMeasurements] = useState<USGSMeasurement[]>([]);
 
   // Phase 3: smart well discovery + column detection
+  // Toggle: does the CSV include per-row well locations (name / lat / lng)?
+  // Default ON when the region has no wells (bootstrap case), off otherwise.
+  const [hasWellColumns, setHasWellColumns] = useState(existingWellCount === 0);
   const [existingWellsFull, setExistingWellsFull] = useState<ExistingWell[]>([]);
   const [aquifersGeojson, setAquifersGeojson] = useState<any>(null);
   const [catalog, setCatalog] = useState<ParameterCatalog | null>(null);
@@ -216,8 +219,11 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
   const hasExistingData = selectedTypes.some(code => (existingCounts[code] || 0) > 0);
 
-  const wellIdRequired = dataSource !== 'upload' || existingWellCount > 0;
-  const smartFields = dataSource === 'upload'
+  // Well ID is required for the legacy strict-matching case. When the
+  // toggle "file includes well locations" is on, we run the smart-matching
+  // pipeline and at least one of {well_id, well_name, lat+long} suffices.
+  const wellIdRequired = dataSource !== 'upload' || (existingWellCount > 0 && !hasWellColumns);
+  const smartFields = dataSource === 'upload' && hasWellColumns
     ? [
         { key: 'well_name', label: 'Well Name', required: false },
         { key: 'lat', label: 'Latitude', required: false },
@@ -1032,8 +1038,15 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   const hasMatchResults = !!matchResults && matchResults.length > 0;
   const isBootstrap = existingWellCount === 0;
 
+  // Row identity: legacy flow needs a well_id column; smart flow accepts
+  // any of well_id / well_name / (lat + long).
+  const hasRowIdentity = !!file && (
+    !!file.mapping['well_id'] ||
+    (hasWellColumns && (!!file.mapping['well_name'] || (!!file.mapping['lat'] && !!file.mapping['long'])))
+  );
+
   const isReady = file && file.mapping['date'] &&
-    (file.mapping['well_id'] || hasMatchResults || isBootstrap) &&
+    (hasRowIdentity || hasMatchResults || isBootstrap) &&
     (isMultiType ? selectedTypes.every(code => typeColumnMapping[code]) : file.mapping['value']) &&
     selectedTypes.length > 0 &&
     (singleUnit || aquiferAssignment !== 'single' || selectedAquiferId) &&
@@ -1226,7 +1239,24 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         {/* Upload flow */}
         {dataSource === 'upload' && (
           <>
-            <p className="text-sm text-slate-500 mb-4">Upload a CSV file with measurement data.</p>
+            <p className="text-sm text-slate-500 mb-3">Upload a CSV file with measurement data.</p>
+
+            {/* Well location toggle — gates the smart well matching pipeline */}
+            <label className="flex items-start gap-2 mb-3 p-3 bg-slate-50 border border-slate-200 rounded-lg cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hasWellColumns}
+                onChange={e => { setHasWellColumns(e.target.checked); setMatchResults(null); setMatchSummary(null); }}
+                className="mt-0.5 text-blue-600 rounded"
+              />
+              <div className="flex-1">
+                <span className="text-sm font-medium text-slate-700">Measurements file includes well locations</span>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Turn on if your CSV has per-row well names or latitude/longitude columns. The importer will match rows to existing wells (by ID, name, or proximity) and can create new wells for unmatched coordinates. Leave off for simple well_id + date + value files.
+                </p>
+              </div>
+            </label>
+
             <label className="block mb-4">
               <input type="file" accept=".csv,.txt" onChange={handleUpload}
                 className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
