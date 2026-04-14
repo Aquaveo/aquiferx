@@ -1725,6 +1725,9 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
                 {matchResults && matchResults.some(r => r.kind === 'proximity' && !r.rejected) && (
                   <details className="text-xs">
                     <summary className="cursor-pointer text-sky-700 hover:text-sky-800">Review proximity matches ({matchResults.filter(r => r.kind === 'proximity' && !r.rejected).length})</summary>
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      Each row below shows a source well from your CSV that was auto-matched to an existing well based on location. If a match looks wrong, click <span className="font-medium text-red-600">Reject</span> to create a new well instead.
+                    </p>
                     <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                       {matchResults.filter(r => r.kind === 'proximity' && !r.rejected).map(r => (
                         <div key={r.sourceRow.sourceIndex} className="flex items-center gap-2 py-1 border-b border-sky-100 last:border-0">
@@ -1734,9 +1737,10 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
                           </span>
                           <button
                             onClick={() => toggleRejectMatch(r.sourceRow.sourceIndex)}
-                            className="text-[10px] text-red-600 hover:text-red-800 font-medium"
+                            title="Reject this match — treat the CSV row as a new well instead"
+                            className="px-2 py-0.5 text-[10px] text-red-600 border border-red-200 rounded hover:bg-red-50 hover:border-red-300 font-medium"
                           >
-                            Treat as new
+                            Reject
                           </button>
                         </div>
                       ))}
