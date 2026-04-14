@@ -694,3 +694,231 @@ The catalog + DataTypeEditor + smart well discovery are **standalone deliverable
 
 - **Visualization**: Keep the current Recharts line chart for WQ time series. Revisit if sparse/irregular data proves problematic.
 - **Duplicate deduplication**: Deferred to Phase 4 — validate the filter-by-fraction + take-first strategy against real WQP data during implementation.
+
+---
+
+## Phase 3.5: Catalog becomes the global default (refactor)
+
+Phases 1–3 landed with an explicit per-region `dataTypes` list that the user curated by browsing the catalog, picking from other regions, or typing in a custom. That's more friction than WQ parameters deserve — nitrate is nitrate everywhere. This phase flips the model so the catalog is the implicit default for every region and per-region setup disappears for the standard parameters.
+
+### Core idea
+
+- **`catalog_wq.json` is the global vocabulary and is immutable from a region's perspective.** Every region implicitly "has" every catalog entry. A region cannot rename "Sulfate" to "Sulphate" or change a catalog unit — the catalog is authoritative so cross-region comparison stays sane.
+- **Effective data types for a region = WTE + catalog entries with data in this region + that region's custom types.**
+- **A catalog type "exists" in a region when `data_{code}.csv` exists.** No pre-declaration needed. Drop a CSV with a `nitrate` column and nitrate appears in the dropdown after save.
+- **`region.json` shrinks** from `dataTypes: DataType[]` to `customDataTypes: DataType[]` — only non-catalog parameters (BOD5, trichloroethane, alternate-unit hardness variants).
+- **If a region needs a genuinely different unit or name** (e.g. hardness as mgCaCO3/L instead of mg/L), that's a **custom type with a non-catalog code** like `hardness_caco3` — a different parameter in its own right, not an override of the catalog entry.
+
+### Data model changes
+
+#### `region.json`
+
+```jsonc
+{
+  "id": "jamaica",
+  "name": "Jamaica",
+  "lengthUnit": "m",
+  "singleUnit": false,
+  "customDataTypes": [
+    { "code": "bod5", "name": "BOD5", "unit": "mg/L" },
+    { "code": "hardness_caco3", "name": "Hardness (as CaCO3)", "unit": "mgCaCO3/L" }
+  ]
+}
+```
+
+**Rule:** `customDataTypes` codes MUST NOT collide with catalog codes. Validation enforces this on save. Customs are for parameters the catalog doesn't cover; if you think the catalog is wrong for everyone, update `catalog_wq.json`, not a single region.
+
+#### TypeScript interfaces
+
+```ts
+interface RegionMeta {
+  id: string;
+  name: string;
+  lengthUnit: 'ft' | 'm';
+  singleUnit: boolean;
+  customDataTypes: DataType[];  // renamed from dataTypes; must not collide with catalog codes
+}
+
+interface Region extends RegionMeta {
+  geojson: any;
+  bounds: [number, number, number, number];
+  // effectiveDataTypes is computed at load time, not stored
+  effectiveDataTypes: DataType[];
+}
+```
+
+`dataLoader.ts` computes `effectiveDataTypes` when building a `Region`:
+
+1. Start with `{ code: 'wte', name: 'Water Table Elevation', unit: lengthUnit === 'm' ? 'm' : 'ft' }`.
+2. For each catalog code, check if `data_{code}.csv` exists — if yes, add the catalog entry's `{ code, name, unit }` unchanged.
+3. Add any `customDataTypes` entry whose `data_{code}.csv` exists (they're the region's genuine non-catalog params like BOD5 or `hardness_caco3`).
+
+Result: a region with only WTE + nitrate data shows a two-item dropdown. A region with WTE + 18 WQ types shows a 19-item dropdown. No noise.
+
+### Migration (one-time, minimal)
+
+The repo state after the Jamaica reset is almost trivial to migrate:
+
+- **Most regions** have only WTE → `customDataTypes: []`.
+- **Dominican Republic** has WTE + `trichloroethane` + `salinity` — both non-catalog → `customDataTypes: [trichloroethane, salinity]`.
+- **Jamaica** is already reset to just WTE (WQ data and wells will be re-imported fresh after this refactor).
+
+No fuzzy-match logic or CSV renaming is needed — no region currently carries catalog-code-conflicting `dataTypes`. The migration step is therefore just a schema rewrite:
+
+1. For each `region.json`, load the current `dataTypes`.
+2. Drop any entry whose code is `wte` or matches a catalog code (shouldn't exist given current state, but the check is cheap insurance).
+3. Write the remaining entries as `customDataTypes`.
+4. Validate that no `customDataTypes` entry collides with a catalog code; fail loudly if so.
+
+This runs once as a small Node script checked into `scripts/` (or inline inside the first PR of Phase 3.5), with the results committed.
+
+### UI changes
+
+#### Header data type dropdown (`App.tsx`)
+- Reads `selectedRegion.effectiveDataTypes` instead of `dataTypes`.
+- Otherwise unchanged. If the effective list has a single entry (WTE), the dropdown is hidden (existing behavior).
+
+#### `DataTypeEditor`
+- **Only manages customs now.** Conceptually rename to "Custom Data Types" (the component filename can stay).
+- **Catalog browse moves to a separate read-only viewer** (see "Catalog Browser" below). A "Browse Catalog" link inside DataTypeEditor opens it so users can see what's already covered before deciding to create a custom.
+- Two add options remain:
+  - **Custom Type** — manual entry. Validation blocks any code that collides with a catalog entry and prompts "Did you mean to import a column as catalog X?".
+  - **From other regions** — cross-region suggestions, still useful for custom codes (one region's TCE can seed another). Filtered to non-catalog codes only.
+- List shows: WTE (locked), each custom type (editable name/unit, deletable). No override rows.
+- Effective types are *displayed* in the header dropdown for reference, but not editable here. The informational note: "Catalog parameters appear automatically once you import data for them. [Browse Catalog]".
+
+#### Catalog Browser (new read-only component)
+
+A standalone, read-only view of `catalog_wq.json` — users can see every parameter, grouped by category, with name, code, unit, group, MCL, and WHO values. No add/edit/delete actions; the catalog is authoritative.
+
+**Layout:**
+
+```
+Parameter Catalog                                                    [Close]
+─────────────────────────────────────────────────────────────────────────
+Search: [__________________]                     38 parameters, 7 groups
+
+▼ Nutrient (6)
+    Nitrate            nitrate           mg/L    MCL 10    WHO 50
+    Nitrite            nitrite           mg/L    MCL 1     WHO 3
+    Ammonia            ammonia           mg/L    —         —
+    ...
+▼ Physical (6)
+    pH                 ph                —       —         —
+    Temperature        temperature       deg C   —         —
+    ...
+▶ Major Ions (8)
+▶ Minor Metals (8)
+▶ Minor Non-metals (3)
+▶ Microbiological (3)
+▶ Other (4)
+```
+
+- Collapsible groups (same as Phase 1's picker, minus the checkboxes).
+- Search filter across code / name / WQP characteristic name — helpful when the user is looking for a specific thing.
+- Clicking a row shows a small popover with WQP mapping (`characteristicName`, `sampleFraction`) for power users.
+
+**Access points:**
+1. **DataTypeEditor** → "Browse Catalog" link (for users considering a custom type).
+2. **ImportDataHub** → a "View Catalog" button next to the region card (for users about to import).
+3. **MeasurementImporter** → "View Catalog" link next to the detection panel header.
+
+All three open the same modal component. Implementation: new file `components/import/CatalogBrowser.tsx` (or a more neutral `components/CatalogBrowser.tsx` since it's used outside of import too).
+
+#### `MeasurementImporter` — column detection becomes a mapping editor
+
+The current detection panel treats each candidate column as a binary include/exclude with an inferred target. The new model is a **three-column mapping editor** because users need to:
+
+1. **Opt out of columns they don't care about** — a CSV with 20 columns might only warrant importing 2.
+2. **Correct typos and variant spellings** — "Nitrte", "Nitrogen-N", "NO3-N", "Sulphate" should all be mappable to the right catalog entry, not forced into custom territory because the auto-match missed.
+3. **Promote a false-custom match to catalog** — or vice versa, demote an unwanted catalog match to a custom type.
+
+**Panel layout** (per row):
+
+```
+[✓] Column: "nitrate"              → Target: [Nitrate (catalog) ▼]   Unit: mg/L
+[✓] Column: "NO3-N"                → Target: [Nitrate (catalog) ▼]   Unit: mg/L    [auto-match]
+[ ] Column: "Bacteria_Count"       → Target: [E. coli (catalog)  ▼]   Unit: CFU/100mL
+[✓] Column: "BOD5"                 → Target: [+ New custom type ▼]   Code: bod5   Unit: mg/L
+[ ] Column: "Sample_ID"            → Target: [— Skip —            ▼]
+```
+
+The **Target dropdown** is the key new element. Options:
+- **Catalog entries** (grouped by category) — the full catalog, searchable. Picks the code/name/unit from the catalog.
+- **Existing region customs** — already-defined `customDataTypes` so repeated imports land in the same file.
+- **+ New custom type** — creates a custom type; exposes editable code/name/unit fields inline. Code must not collide with the catalog.
+- **— Skip —** — don't import this column.
+
+**Auto-match behavior**: the importer runs `suggestDataTypesFromColumns` to pre-select the Target for each row. Catalog matches are pre-checked; anything that falls through to custom or skip is pre-unchecked. The user can override any Target by opening the dropdown.
+
+**Bulk toggles** at the top of the panel: "Include all" / "Only catalog matches" / "None" — makes the 20-column case fast.
+
+**Unit display**:
+- **Catalog target** → unit is read-only (catalog is authoritative). If the CSV header explicitly includes a unit (e.g. `nitrate (ug/L)`) and it doesn't match the catalog, show a yellow warning badge: `header says ug/L, catalog is mg/L — verify your values before importing`. Values import as-is; the app does not auto-convert. The user can uncheck the row, fix the CSV, and re-upload if needed. In practice headers rarely include units, so this fires only in narrow cases — build conversion tooling later if the warning proves insufficient.
+- **Custom target** → unit is editable. Default to the CSV header's unit hint, or blank.
+- **Skip** → unit field hidden.
+
+**`newDataTypesToAdd`** feeds `customDataTypes` only for rows whose Target is `+ New custom type`. Catalog-targeted rows don't need to be "added" — they're implicit once their CSV is written.
+
+#### `ImportDataHub`
+- The "Data Types" editor card description changes to "Custom Data Types" (same component, scoped purpose).
+- Measurement counts shown per region still use `effectiveDataTypes` for display.
+
+### Services that change
+
+| File | Change |
+|------|--------|
+| `services/catalog.ts` | Add `getCatalogTypeAsDataType(code)` helper that returns a `DataType` from a catalog code. |
+| `services/dataLoader.ts` | Compute `effectiveDataTypes` when building Region: scan `data_*.csv` filenames, merge catalog + customs + overrides. |
+| `services/wellMatching.ts` | `suggestDataTypesFromColumns` already handles catalog-first matching — tweak the return so catalog hits are flagged `autoApply: true` and customs are `needsReview: true`. |
+| `services/importUtils.ts` | No change. |
+| `components/import/DataTypeEditor.tsx` | Rework to edit only customs; catalog browse removed (link to CatalogBrowser instead). |
+| `components/CatalogBrowser.tsx` | New read-only catalog viewer, grouped + searchable. Opened from DataTypeEditor, ImportDataHub, and MeasurementImporter. |
+| `components/import/MeasurementImporter.tsx` | Filter the detection panel to only show non-catalog suggestions; auto-apply the rest. |
+| `App.tsx` | Read from `selectedRegion.effectiveDataTypes`. |
+| `types.ts` | `RegionMeta.dataTypes` → `customDataTypes`; `Region` gains `effectiveDataTypes`. |
+| `vite.config.ts` | Endpoint for listing `data_*.csv` per region so `dataLoader` can compute effective types. Or include the filename list in the `/api/regions` response. |
+
+### Edge cases and decisions
+
+- **Listing data files per region**: either list via `fs.readdir` in a new middleware endpoint, or extend `/api/regions` to include a `dataFiles: string[]` field per region. The second is cheaper since we already walk the folder. Go with that.
+- **Empty data file edge case**: a zero-row `data_nitrate.csv` would still count as "nitrate exists in this region". Acceptable — the user either imports data (making it real) or they don't (empty dropdown entry, deletable via DataTypeEditor as an override to "remove").
+- **Deleting a data type from a region**: today DataTypeEditor deletes both the metadata and the CSV. In the new model, deletion means removing the CSV (and any override). Implementation is the same file-delete; the type disappears from `effectiveDataTypes` on next load because its CSV is gone.
+- **Region with zero data**: empty effective list except WTE. Existing bootstrap-from-CSV flow (Phase 3) still works because detection accepts catalog columns automatically.
+- **Unit mismatch at import**: fires only when the CSV header explicitly carries a unit (e.g. `nitrate (ug/L)`) that disagrees with the catalog. Shows a warning badge; values import as-is. Users fix by correcting the CSV and re-uploading, or opt out of the row. No auto-conversion in this refactor — add it later if this turns out to be a real pain point.
+- **Backwards compat for consumers outside this refactor**: raster analyses, imputation models, etc. store a `dataType: string` code. These still work — the code is just a key.
+- **Jamaica's past `flouride` typo**: the migration script's fuzzy-match tier reconciles `flouride` → `fluoride` by renaming `data_flouride.csv` to `data_fluoride.csv` (with user confirmation). Same for `sulphate` → `sulfate`. No override mechanism needed.
+- **Custom-code collision with catalog**: if a user tries to create a custom type with a code that exists in the catalog, validation blocks it and suggests importing the column as the catalog entry instead.
+- **No pre-staging empty types**: under this model, a data type exists in a region exactly when its `data_{code}.csv` exists. You cannot "add Nitrate" to a region before importing data for it — there's no useful behavior for an empty type (nothing to chart, nothing to map, nothing to analyze). The only user-visible action that creates a type is importing data. This is a deliberate simplification of the old "declare then import" workflow. **Document this clearly** in the DataTypeEditor help text, in ImportDataHub's empty-state copy, and in CLAUDE.md's conventions section so the behavior doesn't surprise future maintainers.
+
+### Implementation phasing
+
+**Phase 3.5a: Data model + loader**
+- Add `RegionMeta.customDataTypes` and `Region.effectiveDataTypes`. Keep `dataTypes` as a transitional alias.
+- Extend `/api/regions` to return `dataFiles: string[]` per region.
+- Rewrite `dataLoader.ts` to compute `effectiveDataTypes` from WTE + catalog + customs + data file listing.
+- Update `App.tsx` + every consumer to read `effectiveDataTypes`.
+- No user-visible changes yet.
+
+**Phase 3.5b: Migration script**
+- One-off Node script that rewrites every `region.json` in `public/data/` under the new shape.
+- Run once, commit the result. Drop the transitional alias.
+
+**Phase 3.5c: DataTypeEditor rework**
+- Repurpose to manage customs + overrides. Catalog browse becomes an override picker.
+- "Types from other regions" suggestions still useful for customs.
+
+**Phase 3.5d: MeasurementImporter simplification**
+- Silent auto-apply for catalog column matches.
+- Detection panel only surfaces non-catalog / unit-mismatch cases.
+- Unit-mismatch warning UI.
+
+**Phase 3.5e: Cleanup**
+- Delete any code that relied on the old "user pre-declares types before import" assumption.
+- Update CLAUDE.md conventions (data type section).
+
+### Risks
+
+- **Big blast radius**: touches types, loader, App, every importer, and every stored `region.json`. Phase 3.5a needs to keep the app functional the whole time; can't half-migrate.
+- **Hidden consumers of `dataTypes`**: raster/imputation code reads `region.dataTypes` to show dropdowns and allocate storage. All need updating to `effectiveDataTypes`.
+- **Override semantics are easy to misread**: a custom entry with a catalog code overrides it, but the behavior isn't obvious from the field name. Consider renaming to `dataTypeOverrides` + `customDataTypes` if the dual-purpose single field proves confusing during implementation.
