@@ -1076,8 +1076,11 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           </div>
         )}
 
-        {/* Data type selection */}
-        {dataSource === 'upload' && dataTypes.length > 0 && (
+        {/* Data type selection — legacy single/multi picker. Only appears
+            when the detection panel has no candidate columns (e.g. a CSV
+            with just well_id/date/value). When the detection panel has
+            candidates it drives type selection and this picker is hidden. */}
+        {dataSource === 'upload' && dataTypes.length > 0 && file && columnMappings.length === 0 && (
           <div className="mb-4">
             <label className="block text-sm font-medium text-slate-700 mb-2">Data Type(s)</label>
             {dataTypes.length > 1 && (

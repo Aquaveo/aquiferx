@@ -183,6 +183,9 @@ const RESERVED_LOWER = new Set([
   'long', 'lng', 'longitude', 'long_dec', 'lon',
   'aquifer_id', 'aquifer', 'aquifer_name',
   'gse', 'elevation', 'ground_surface_elevation', 'surface_elevation',
+  // Generic value / measurement columns — handled by the single-type
+  // legacy picker path, not the column-detection panel
+  'value', 'wte', 'water table elevation', 'measurement', 'reading',
 ]);
 
 function isReservedColumn(col: string): boolean {

@@ -892,32 +892,32 @@ The **Target dropdown** is the key new element. Options:
 
 ### Implementation phasing
 
-**Phase 3.5a: Data model + loader**
-- Add `RegionMeta.customDataTypes` and `Region.effectiveDataTypes`. Keep `dataTypes` as a transitional alias.
-- Extend `/api/regions` to return `dataFiles: string[]` per region.
-- Rewrite `dataLoader.ts` to compute `effectiveDataTypes` from WTE + catalog + customs + data file listing.
-- Update `App.tsx` + every consumer to read `effectiveDataTypes`.
-- No user-visible changes yet.
+**Phase 3.5a: Data model + loader** — **done**
+- Added `RegionMeta.customDataTypes` and `Region.effectiveDataTypes`.
+- `/api/regions` now returns `dataFiles: string[]` per region.
+- `dataLoader.ts` and `services/catalog.ts#computeEffectiveDataTypes` compose the effective list from WTE + catalog-with-data + customs-with-data.
+- All consumers (App.tsx, ImportDataHub, MeasurementImporter, DataTypeEditor, WellImporter, AquiferImporter, RegionImporter, AquiferEditor) updated.
 
-**Phase 3.5b: Migration script**
-- One-off Node script that rewrites every `region.json` in `public/data/` under the new shape.
-- Run once, commit the result. Drop the transitional alias.
+**Phase 3.5b: Migration** — **done (manual)**
+- All 9 existing `region.json` files rewritten by hand rather than via a script; only DR kept non-catalog customs (`trichloroethane`, `salinity`, since removed by the user).
 
-**Phase 3.5c: DataTypeEditor rework**
-- Repurpose to manage customs + overrides. Catalog browse becomes an override picker.
-- "Types from other regions" suggestions still useful for customs.
+**Phase 3.5c: DataTypeEditor rework + Catalog Browser** — **done** (bundled with 3.5a commit)
+- DataTypeEditor now manages customs only; catalog browse removed from the editor.
+- Catalog-code collisions blocked with an inline error.
+- New `components/CatalogBrowser.tsx` read-only modal opened from DataTypeEditor ("Browse Catalog" link) and MeasurementImporter ("View Catalog" link).
 
-**Phase 3.5d: MeasurementImporter simplification**
-- Silent auto-apply for catalog column matches.
-- Detection panel only surfaces non-catalog / unit-mismatch cases.
-- Unit-mismatch warning UI.
+**Phase 3.5d: MeasurementImporter mapping editor** — **done**
+- Detection panel is now a per-column mapping editor with a Target dropdown (catalog entries / region customs / new custom / … toggleable).
+- Every column is explicit opt-in/out regardless of match type — catalog matches pre-checked, new customs pre-unchecked.
+- Bulk toggles: Include all / Only catalog matches / None.
+- Unit mismatch (CSV header unit disagrees with catalog) flagged with a warning; values import as-is, no auto-conversion.
+- `suggestDataTypesFromColumns` source categories cleaned up; catalog matches win first.
 
-**Phase 3.5e: Cleanup**
+**Phase 3.5e: Cleanup** — in progress
 - Delete any code that relied on the old "user pre-declares types before import" assumption.
-- Update CLAUDE.md conventions (data type section).
+- Update CLAUDE.md conventions (data type section). **done**
 
 ### Risks
 
 - **Big blast radius**: touches types, loader, App, every importer, and every stored `region.json`. Phase 3.5a needs to keep the app functional the whole time; can't half-migrate.
 - **Hidden consumers of `dataTypes`**: raster/imputation code reads `region.dataTypes` to show dropdowns and allocate storage. All need updating to `effectiveDataTypes`.
-- **Override semantics are easy to misread**: a custom entry with a catalog code overrides it, but the behavior isn't obvious from the field name. Consider renaming to `dataTypeOverrides` + `customDataTypes` if the dual-purpose single field proves confusing during implementation.

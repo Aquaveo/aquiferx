@@ -11,10 +11,6 @@ export async function loadCatalog(): Promise<ParameterCatalog> {
   return cachedCatalog;
 }
 
-export function catalogToDataType(code: string, param: CatalogParameter): DataType {
-  return { code, name: param.name, unit: param.unit };
-}
-
 /** Compute the effective data type list for a region: WTE + catalog entries
  *  with data on disk + custom types with data on disk. Pass the raw catalog
  *  and the region's server-reported `dataFiles` list. */
