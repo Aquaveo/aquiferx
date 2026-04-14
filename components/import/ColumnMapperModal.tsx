@@ -82,13 +82,7 @@ const ColumnMapperModal: React.FC<ColumnMapperModalProps> = ({
           )}
         </div>
 
-        <div className="flex justify-end space-x-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-white text-slate-600 border border-slate-300 rounded-lg font-medium text-sm hover:bg-slate-50"
-          >
-            Close
-          </button>
+        <div className="flex justify-end">
           <button
             onClick={onClose}
             className="px-4 py-2 bg-slate-800 text-white rounded-lg font-medium text-sm hover:bg-slate-700"
