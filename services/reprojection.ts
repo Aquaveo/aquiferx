@@ -5,8 +5,8 @@ const KNOWN_CRS: Record<string, string> = {
   'EPSG:4326': '+proj=longlat +datum=WGS84 +no_defs',
   'EPSG:3857': '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs',
   'EPSG:32601': '+proj=utm +zone=1 +datum=WGS84 +units=m +no_defs',
-  // JAD2001 / Jamaica Metric Grid — used in Jamaican groundwater datasets
-  'EPSG:3448': '+proj=lcc +lat_1=17.93333333333333 +lat_2=18.06666666666667 +lat_0=18 +lon_0=-77 +x_0=750000 +y_0=650000 +ellps=WGS84 +units=m +no_defs',
+  // JAD2001 / Jamaica Metric Grid — LCC 1SP form from epsg.io
+  'EPSG:3448': '+proj=lcc +lat_1=18 +lat_0=18 +lon_0=-77 +k_0=1 +x_0=750000 +y_0=650000 +ellps=WGS84 +units=m +no_defs',
 };
 
 // Dropdown options for the importer's CRS picker. Keep this short — common
@@ -243,12 +243,21 @@ export async function autoDetectCrs(
   const wgsResult = await tryCandidate('EPSG:4326', 'WGS84 — latitude / longitude');
   if (wgsResult) return wgsResult;
 
-  // 2. UTM zone from region centroid
-  const utm = computeUtmEpsg(centerLng, centerLat);
-  const utmResult = await tryCandidate(utm, `${utm} — UTM zone (computed from region centroid)`);
-  if (utmResult) return utmResult;
+  // 2. Curated list of common projected CRSes (JAD2001, Web Mercator, etc.)
+  for (const opt of COMMON_CRS_OPTIONS) {
+    if (candidatesTried.includes(opt.code)) continue;
+    const result = await tryCandidate(opt.code, opt.label);
+    if (result) return result;
+  }
 
-  // 3. EPSG candidates valid at the region centroid
+  // 3. UTM zone from region centroid
+  const utm = computeUtmEpsg(centerLng, centerLat);
+  if (!candidatesTried.includes(utm)) {
+    const utmResult = await tryCandidate(utm, `${utm} — UTM zone (computed from region centroid)`);
+    if (utmResult) return utmResult;
+  }
+
+  // 4. EPSG candidates valid at the region centroid (via epsg.io)
   const localCandidates = await lookupEpsgCandidatesNear(centerLat, centerLng);
   for (const code of localCandidates) {
     if (candidatesTried.includes(code)) continue;
