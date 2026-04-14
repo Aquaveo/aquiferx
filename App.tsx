@@ -477,6 +477,19 @@ const App: React.FC = () => {
       setMeasurements(data.measurements);
       setRasterMeta(data.storageMeta);
       setModelMeta(data.modelMeta);
+      // Re-resolve the current selection against the fresh data so that
+      // derived state like effectiveDataTypes / filteredWells picks up
+      // changes from the import (new wells, new data types, etc).
+      if (selectedRegion) {
+        const updatedRegion = data.regions.find(r => r.id === selectedRegion.id);
+        if (updatedRegion) setSelectedRegion(updatedRegion);
+      }
+      if (selectedAquifer) {
+        const updatedAquifer = data.aquifers.find(
+          a => a.id === selectedAquifer.id && a.regionId === selectedAquifer.regionId
+        );
+        if (updatedAquifer) setSelectedAquifer(updatedAquifer);
+      }
     } catch (e) {
       console.error('Failed to reload data:', e);
     }
