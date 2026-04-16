@@ -195,12 +195,16 @@ function isReservedColumn(col: string): boolean {
 function buildCatalogIndex(catalog: ParameterCatalog): Map<string, { code: string; param: CatalogParameter }> {
   const index = new Map<string, { code: string; param: CatalogParameter }>();
   for (const [code, param] of Object.entries(catalog.parameters)) {
+    const entry = { code, param };
     const keys = new Set<string>();
     keys.add(normalizeName(code));
     keys.add(normalizeName(param.name));
     if (param.wqp?.characteristicName) keys.add(normalizeName(param.wqp.characteristicName));
+    // Auto-computed acronym: "Fecal Coliform" → "fc", "Total Dissolved Solids" → "tds"
+    const acronym = computeAcronym(param.name);
+    if (acronym) keys.add(acronym);
     for (const k of keys) {
-      if (k && !index.has(k)) index.set(k, { code, param });
+      if (k && !index.has(k)) index.set(k, entry);
     }
   }
   return index;
@@ -210,22 +214,11 @@ function slugCode(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 20) || 'custom';
 }
 
-// Common abbreviations, chemical symbols, and spelling variants mapped to
-// their catalog code. Checked after exact match fails and before substring
-// fallback so short names like "FC" and alternate spellings like "Sulphate"
-// resolve to the right catalog entry.
-const COLUMN_ALIASES: Record<string, string> = {
-  // Spelling variants
-  sulphate: 'sulfate', sulphates: 'sulfate',
-  flouride: 'fluoride',
-  // Abbreviations
-  fc: 'fecal_coliform', tc: 'total_coliform',
-  ec: 'conductivity', sc: 'conductivity',
-  do: 'dissolved_oxygen',
-  alk: 'alkalinity',
-  temp: 'temperature',
-  turb: 'turbidity',
-  // Chemical symbols / formulas
+// Chemical formulas and symbols that can't be derived algorithmically from
+// catalog names. Acronyms (FC, TDS, DO) are computed automatically; spelling
+// variants (Sulphate) are caught by Levenshtein distance. This table is
+// only for formula→code mappings.
+const CHEMICAL_ALIASES: Record<string, string> = {
   no3: 'nitrate', no2: 'nitrite',
   nh3: 'ammonia', nh4: 'ammonia',
   po4: 'phosphorus',
@@ -235,11 +228,34 @@ const COLUMN_ALIASES: Record<string, string> = {
   fe: 'iron', mn: 'manganese', cl: 'chloride',
   as: 'arsenic', pb: 'lead', cu: 'copper', zn: 'zinc',
   cr: 'chromium', se: 'selenium', b: 'boron', si: 'silica', f: 'fluoride',
-  // Common short forms
-  'e coli': 'e_coli', ecoli: 'e_coli',
-  'sp cond': 'conductivity', 'spec cond': 'conductivity',
-  'specific conductance': 'conductivity',
+  ecoli: 'e_coli', 'e coli': 'e_coli',
 };
+
+// Compute the acronym of a multi-word name: "Fecal Coliform" → "fc",
+// "Total Dissolved Solids" → "tds". Single-word names return the first
+// 3 chars as a pseudo-acronym ("Nitrate" → "nit").
+function computeAcronym(name: string): string {
+  const words = name.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+  if (words.length <= 1) return '';
+  return words.map(w => w[0]).join('');
+}
+
+// Levenshtein edit distance — O(mn) DP, fine for short strings
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const curr = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[n];
+}
 
 export function suggestDataTypesFromColumns(
   columns: string[],
@@ -267,10 +283,11 @@ export function suggestDataTypesFromColumns(
     if (!norm) continue;
 
     // 1. Catalog — authoritative for standard parameters
-    // Try: exact normalized → alias table → substring
-    const aliasCode = COLUMN_ALIASES[norm];
+    // Match tiers: exact → chemical formula alias → Levenshtein → substring
+    const chemAlias = CHEMICAL_ALIASES[norm];
     const catHit = catalogIdx.get(norm)
-      || (aliasCode && catalog ? { code: aliasCode, param: catalog.parameters[aliasCode] } : null)
+      || (chemAlias && catalog ? { code: chemAlias, param: catalog.parameters[chemAlias] } : null)
+      || findLevenshteinCatalogMatch(norm, catalogIdx)
       || findSubstringCatalogMatch(norm, catalogIdx);
     if (catHit && catHit.param) {
       suggestions.push({
@@ -329,8 +346,25 @@ export function suggestDataTypesFromColumns(
   return suggestions;
 }
 
+// Levenshtein fuzzy match: catches spelling variants (Sulphate→Sulfate,
+// Flouride→Fluoride) without hardcoded lists. Only fires for inputs ≥ 4 chars
+// and accepts distance ≤ 2 to avoid false positives on short strings.
+function findLevenshteinCatalogMatch(norm: string, index: Map<string, { code: string; param: CatalogParameter }>) {
+  if (norm.length < 4) return null;
+  const maxDist = 2;
+  let best: { entry: { code: string; param: CatalogParameter }; dist: number } | null = null;
+  for (const [key, entry] of index) {
+    if (key.length < 4) continue;
+    if (Math.abs(key.length - norm.length) > maxDist) continue;
+    const d = levenshtein(norm, key);
+    if (d <= maxDist && (!best || d < best.dist)) {
+      best = { entry, dist: d };
+    }
+  }
+  return best?.entry || null;
+}
+
 function findSubstringCatalogMatch(norm: string, index: Map<string, { code: string; param: CatalogParameter }>) {
-  // Try partial: catalog key contained in norm, or norm contained in key
   for (const [key, entry] of index) {
     if (key.length < 3) continue;
     if (norm.includes(key) || key.includes(norm)) return entry;
