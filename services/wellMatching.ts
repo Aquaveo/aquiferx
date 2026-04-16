@@ -210,6 +210,37 @@ function slugCode(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 20) || 'custom';
 }
 
+// Common abbreviations, chemical symbols, and spelling variants mapped to
+// their catalog code. Checked after exact match fails and before substring
+// fallback so short names like "FC" and alternate spellings like "Sulphate"
+// resolve to the right catalog entry.
+const COLUMN_ALIASES: Record<string, string> = {
+  // Spelling variants
+  sulphate: 'sulfate', sulphates: 'sulfate',
+  flouride: 'fluoride',
+  // Abbreviations
+  fc: 'fecal_coliform', tc: 'total_coliform',
+  ec: 'conductivity', sc: 'conductivity',
+  do: 'dissolved_oxygen',
+  alk: 'alkalinity',
+  temp: 'temperature',
+  turb: 'turbidity',
+  // Chemical symbols / formulas
+  no3: 'nitrate', no2: 'nitrite',
+  nh3: 'ammonia', nh4: 'ammonia',
+  po4: 'phosphorus',
+  so4: 'sulfate',
+  hco3: 'bicarbonate', co3: 'carbonate',
+  ca: 'calcium', mg: 'magnesium', na: 'sodium', k: 'potassium',
+  fe: 'iron', mn: 'manganese', cl: 'chloride',
+  as: 'arsenic', pb: 'lead', cu: 'copper', zn: 'zinc',
+  cr: 'chromium', se: 'selenium', b: 'boron', si: 'silica', f: 'fluoride',
+  // Common short forms
+  'e coli': 'e_coli', ecoli: 'e_coli',
+  'sp cond': 'conductivity', 'spec cond': 'conductivity',
+  'specific conductance': 'conductivity',
+};
+
 export function suggestDataTypesFromColumns(
   columns: string[],
   catalog: ParameterCatalog | null,
@@ -236,8 +267,12 @@ export function suggestDataTypesFromColumns(
     if (!norm) continue;
 
     // 1. Catalog — authoritative for standard parameters
-    const catHit = catalogIdx.get(norm) || findSubstringCatalogMatch(norm, catalogIdx);
-    if (catHit) {
+    // Try: exact normalized → alias table → substring
+    const aliasCode = COLUMN_ALIASES[norm];
+    const catHit = catalogIdx.get(norm)
+      || (aliasCode && catalog ? { code: aliasCode, param: catalog.parameters[aliasCode] } : null)
+      || findSubstringCatalogMatch(norm, catalogIdx);
+    if (catHit && catHit.param) {
       suggestions.push({
         column: col,
         code: catHit.code,
