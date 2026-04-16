@@ -120,6 +120,10 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   const [newWellsGseProgress, setNewWellsGseProgress] = useState({ done: 0, total: 0 });
   const [showCatalogBrowser, setShowCatalogBrowser] = useState(false);
 
+  // Duplicate handling strategy when multiple rows share the same well+date
+  type DuplicateStrategy = 'average' | 'maximum' | 'keep-all';
+  const [duplicateStrategy, setDuplicateStrategy] = useState<DuplicateStrategy>('average');
+
   // Post-save summary
   interface ImportSummary {
     wellsAdded: number;
@@ -129,6 +133,8 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     measurementsByType: Record<string, number>;
     typeNames: Record<string, string>;
     skippedRows: number;
+    duplicatesCollapsed: number;
+    duplicateStrategyUsed: DuplicateStrategy;
   }
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
 
@@ -857,6 +863,37 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
       const effectiveGseMap: Record<string, number> = { ...wellGseMap };
       for (const w of newWellRecords) if (w.gse) effectiveGseMap[w.well_id] = w.gse;
 
+      // Deduplicate within a batch by well_id+date. Strategy is user-selected.
+      type MeasRow = { well_id: string; date: string; value: string; aquifer_id: string };
+      let totalDupsCollapsed = 0;
+      const dedup = (rows: MeasRow[]): MeasRow[] => {
+        if (duplicateStrategy === 'keep-all') return rows;
+        // Group by key
+        const groups = new Map<string, MeasRow[]>();
+        for (const r of rows) {
+          const key = `${r.well_id}|${r.date}`;
+          const arr = groups.get(key);
+          if (arr) arr.push(r); else groups.set(key, [r]);
+        }
+        const result: MeasRow[] = [];
+        for (const [, group] of groups) {
+          if (group.length === 1) { result.push(group[0]); continue; }
+          totalDupsCollapsed += group.length - 1;
+          const nums = group.map(r => parseFloat(r.value)).filter(v => !isNaN(v));
+          let finalVal: string;
+          if (nums.length === 0) {
+            finalVal = group[0].value;
+          } else if (duplicateStrategy === 'average') {
+            finalVal = String(Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 1000) / 1000);
+          } else {
+            // maximum
+            finalVal = String(Math.max(...nums));
+          }
+          result.push({ ...group[0], value: finalVal });
+        }
+        return result;
+      };
+
       // Collect summary counts as we write each data file
       const summaryByType: Record<string, number> = {};
       const typeNames: Record<string, string> = {};
@@ -868,7 +905,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
           const isWteDepth = typeCode === 'wte' && wteIsDepth;
 
-          let processed = rows
+          let processed = dedup(rows
             .filter(r => rowToWellId(r) && r[dateCol] && r[valueCol])
             .map(r => {
               const wid = rowToWellId(r);
@@ -886,7 +923,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
                 value: val,
                 aquifer_id: resolveAquifer(r),
               };
-            });
+            }));
 
           // Skip writing anything for this type if the CSV contributed no
           // rows — don't leave behind empty header-only files or phantom
@@ -913,7 +950,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         const valueCol = file.mapping['value'];
         const isWteDepth = typeCode === 'wte' && wteIsDepth;
 
-        let processed = rows
+        let processed = dedup(rows
           .filter(r => rowToWellId(r) && r[dateCol] && r[valueCol])
           .map(r => {
             const wid = rowToWellId(r);
@@ -931,7 +968,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
               value: val,
               aquifer_id: resolveAquifer(r),
             };
-          });
+          }));
 
         // Skip empty imports so we don't create header-only phantom files
         if (processed.length === 0) {
@@ -1014,6 +1051,8 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         measurementsByType: summaryByType,
         typeNames,
         skippedRows: Math.max(0, allRows.length - rows.length),
+        duplicatesCollapsed: totalDupsCollapsed,
+        duplicateStrategyUsed: duplicateStrategy,
       };
       setImportSummary(summary);
     } catch (err) {
@@ -1152,6 +1191,40 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   }, [file, wellAquiferMap, matchResults]);
 
   const hasSmartColumns = !!(file && (file.mapping['lat'] || file.mapping['long'] || file.mapping['well_name']));
+
+  // Pre-save duplicate detection: scan the loaded CSV for rows that share
+  // the same well identity + date. Shown as an info banner with the strategy
+  // dropdown so the user picks their handling before Save.
+  const duplicateInfo = useMemo(() => {
+    if (!file || dataSource !== 'upload') return null;
+    const rows = file.data as Record<string, string>[];
+    const dateCol = file.mapping['date'];
+    const wellIdCol = file.mapping['well_id'];
+    const wellNameCol = file.mapping['well_name'];
+    if (!dateCol) return null;
+    // Use the same identity key as doSave so the counts match reality
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      const wid = wellIdCol ? (r[wellIdCol] || '').trim() : '';
+      const wname = wellNameCol ? (r[wellNameCol] || '').trim() : '';
+      const identity = wid || wname || '';
+      if (!identity) continue;
+      const date = r[dateCol] || '';
+      if (!date) continue;
+      const key = `${identity}|${date}`;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    let duplicateGroups = 0;
+    let extraRows = 0;
+    for (const c of counts.values()) {
+      if (c > 1) {
+        duplicateGroups++;
+        extraRows += c - 1;
+      }
+    }
+    if (duplicateGroups === 0) return null;
+    return { duplicateGroups, extraRows };
+  }, [file, dataSource]);
   const hasMatchResults = !!matchResults && matchResults.length > 0;
   const isBootstrap = existingWellCount === 0;
 
@@ -1227,6 +1300,13 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
               </ul>
             )}
           </div>
+
+          {importSummary.duplicatesCollapsed > 0 && (
+            <p className="text-xs text-slate-600 mb-2">
+              {importSummary.duplicatesCollapsed.toLocaleString()} duplicate{importSummary.duplicatesCollapsed !== 1 ? 's' : ''} collapsed
+              ({importSummary.duplicateStrategyUsed === 'average' ? 'averaged' : importSummary.duplicateStrategyUsed === 'maximum' ? 'kept maximum' : 'kept all'})
+            </p>
+          )}
 
           {importSummary.skippedRows > 0 && (
             <p className="text-xs text-amber-700 mb-4">
@@ -1877,6 +1957,28 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
             {qualityReport.fixed.count === 0 && qualityReport.dropped.count === 0 && (
               <p className="text-xs text-green-600">All records passed validation.</p>
             )}
+          </div>
+        )}
+
+        {/* Duplicate handling — shown when the CSV has same-well same-date rows */}
+        {file && dataSource === 'upload' && duplicateInfo && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-amber-800">
+                <AlertTriangle size={12} className="inline mr-1 -mt-0.5" />
+                <span className="font-medium">{duplicateInfo.duplicateGroups}</span> well{duplicateInfo.duplicateGroups !== 1 ? 's have' : ' has'} multiple
+                samples on the same date (<span className="font-medium">{duplicateInfo.extraRows}</span> extra row{duplicateInfo.extraRows !== 1 ? 's' : ''}).
+              </p>
+              <select
+                value={duplicateStrategy}
+                onChange={e => setDuplicateStrategy(e.target.value as DuplicateStrategy)}
+                className="ml-3 px-2 py-1 border border-amber-200 rounded text-xs bg-white"
+              >
+                <option value="average">Average duplicates</option>
+                <option value="maximum">Keep maximum</option>
+                <option value="keep-all">Keep all (no dedup)</option>
+              </select>
+            </div>
           </div>
         )}
 
