@@ -103,7 +103,9 @@ export function parseDate(dateStr: string, format: string): string {
         if (parts.length === 3) {
           month = parts[0].padStart(2, '0');
           day = parts[1].padStart(2, '0');
-          year = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+          year = parts[2].length === 2
+            ? (parseInt(parts[2], 10) >= 50 ? '19' : '20') + parts[2]
+            : parts[2];
           return `${year}-${month}-${day}`;
         }
         break;
@@ -113,7 +115,9 @@ export function parseDate(dateStr: string, format: string): string {
         if (parts.length === 3) {
           day = parts[0].padStart(2, '0');
           month = parts[1].padStart(2, '0');
-          year = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+          year = parts[2].length === 2
+            ? (parseInt(parts[2], 10) >= 50 ? '19' : '20') + parts[2]
+            : parts[2];
           return `${year}-${month}-${day}`;
         }
         break;
