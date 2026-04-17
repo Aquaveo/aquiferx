@@ -1,107 +1,61 @@
 # Overview of the App
 
-Aquifer Analyst is a single-page web application built with React and TypeScript. It runs entirely in the browser with a lightweight Vite development server that also provides file-based API endpoints for reading and writing data. There is no separate backend database — all data is stored as files on disk.
+Aquifer Analyst organizes groundwater monitoring data around a natural hierarchy and gives you a coordinated set of visualization and analysis tools that operate on that data. This page describes the interface you see when you open the application, the data model behind it, and the conventions that tie the pieces together. The [Getting Started](getting-started.md) guide covers installation; later pages cover the specific workflows for preparing, importing, and analyzing data in depth.
 
-## Interface Layout
+## The Interface
 
-The application is organized into four main areas:
+The application opens with four elements sharing the screen. A toolbar runs along the top and holds global controls. A sidebar on the left organizes your data hierarchically. The map fills the center of the screen and shows where your wells are. A time series chart at the bottom shows the measurements at whichever wells you've selected. Each pane responds to selections made in the others, so the entire workspace stays in sync as you navigate.
 
-<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Annotated full interface showing all four areas</div>
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Annotated full interface showing toolbar, sidebar, map, and chart</div>
 
-1. **Toolbar** — The top bar contains action buttons and selectors:
-    - **Data Type Selector** — Switch between measurement types (e.g., Water Table Elevation, salinity).
-    - **Manage Data** — Open the Import Data Hub.
-    - **Trend Analysis** — Toggle trend analysis mode.
-    - **Spatial Analysis** — Launch the spatial analysis wizard.
-    - **Impute Data** — Launch the imputation wizard.
-    - **Export CSV** — Download the current time series data as CSV.
-    - **Expand Chart** — Open the time series chart in a floating, resizable window.
+The **toolbar** at the top has two halves. On the left is the data type selector, a dropdown that chooses which measurement parameter (water table elevation, nitrate, arsenic, and so on) the rest of the application displays. Changing this selection is the single action that ripples across everything else — the map re-colors its well markers by the number of observations of the new parameter, the chart switches to show that parameter's values, exports operate on it. On the right are the buttons that launch the major workflows: **Manage Data** opens the import hub; **Trend Analysis** toggles a region-wide linear-regression view on the map; **Spatial Analysis** launches the interpolation wizard that produces kriged or IDW raster surfaces; **Impute Data** launches the machine-learning gap-filling wizard; **Export CSV** saves the currently displayed time series; and **Expand Chart** pops the chart out into a floating, resizable window.
 
-2. **Sidebar** — A hierarchical tree on the left displaying:
-    - **Regions** at the top level
-    - **Aquifers** nested under each region
-    - **Wells** nested under each aquifer
-    - **Raster Analyses** listed under the selected aquifer
-    - **Imputation Models** listed under the selected aquifer
-    - Right-click context menus for editing, renaming, deleting, and downloading.
+The **sidebar** on the left shows your data as a tree. Regions are listed at the top level, with aquifers nested inside each region and wells nested inside each aquifer. Any computed analyses — spatial rasters or imputation models — are listed under the aquifer they were computed for. Clicking an item selects it and drives what the map and chart display. Right-clicking any item opens a context menu for editing, renaming, downloading as a ZIP archive, or deleting. The tree expands and collapses as you navigate, with the currently relevant branch kept open and siblings folded away to keep the panel readable for large datasets.
 
-3. **Map** — An interactive Leaflet map in the center showing:
-    - Region and aquifer boundaries
-    - Well locations as colored markers
-    - Raster overlays when a spatial analysis is active
-    - Eight basemap options (OpenStreetMap, Esri Imagery, Topographic, and more)
+The **map** takes up the center of the screen. It renders on top of a basemap of your choice — eight are built in, ranging from OpenStreetMap to satellite imagery to minimal light- or dark-gray canvases — and shows the boundaries of the selected region and aquifer along with every well in the current view as a colored circular marker. Marker color reflects how many observations that well has for the currently selected data type, so data-rich parts of an aquifer read as a dark cluster and data-sparse parts fade toward the basemap. Clicking a well selects it; shift-clicking additional wells or shift-dragging a rectangle adds them to the selection. Selected wells display a gold ring. When a spatial analysis is active, the interpolated raster surface appears as a semi-transparent overlay on top of the basemap.
 
-4. **Time Series Chart** — A Recharts-based chart below the map displaying:
-    - Measurement data for selected well(s)
-    - PCHIP or linear interpolation curves
-    - Optional trend lines, ground surface elevation, and smoothing overlays
+The **time series chart** at the bottom of the screen plots the measurement history for whichever wells are currently selected. Each well appears as a distinct color drawn from an eight-color palette, with smooth PCHIP-interpolated curves tracing through the actual measurement points. A tab strip switches the chart between its different views: the default time series, a storage-volume-change plot (when a spatial raster is loaded), per-frame raster statistics, and cross-section profiles. The tabs appear only when their underlying data exists, so the chart doesn't clutter itself with views that aren't relevant.
 
-## Data Hierarchy
+## The Data Hierarchy
 
-Aquifer Analyst organizes data in a four-level hierarchy:
+The application organizes data around a four-level hierarchy that reflects how groundwater monitoring data naturally arranges itself. At the top is the **region** — the geographic container your monitoring program covers. A region might be a state, a river basin, an aquifer system, or a study area of any other shape. Each region has a name, a length unit (feet or meters, which controls how elevations and depths are displayed), a boundary polygon that defines its extent, and a set of aquifers inside it. You can work with a single region at a time or have several loaded simultaneously, switching between them in the sidebar.
 
-```
-Region
-├── Aquifer(s)
-│   ├── Well(s)
-│   │   └── Measurement(s)
-│   ├── Raster Analyses
-│   └── Imputation Models
-```
+Nested inside each region is one or more **aquifers**, defined by their own boundary polygons. Aquifers represent the geologic units your wells tap into — a sand-and-gravel aquifer in one part of the region, a fractured-bedrock aquifer in another. Some regions contain many aquifers, others just one; the application handles single-aquifer regions specially so you don't have to set up aquifer boundaries when the region is geologically simple (covered in the next section).
 
-- **Region** — A geographic area of interest defined by a boundary polygon. Contains metadata such as the name, length unit (feet or meters), and whether it uses a single aquifer or multiple aquifers.
-- **Aquifer** — A subdivision within a region, defined by a boundary polygon. In single-unit regions, one aquifer is created automatically and the aquifer level is hidden in the UI.
-- **Well** — A monitoring well with a geographic location (latitude/longitude), optional ground surface elevation (GSE), and an aquifer assignment.
-- **Measurement** — A time-stamped value recorded at a well (e.g., water table elevation, salinity).
+Inside each aquifer are the **wells** — the physical monitoring locations where measurements are made. A well has coordinates, an optional ground surface elevation, and an aquifer assignment. In multi-aquifer regions the assignment is derived automatically by checking which aquifer polygon contains the well's coordinates; you rarely need to tag wells manually. Wells are shared across all measurement types: the same well can produce water-level readings, nitrate samples, and arsenic samples, each stored separately but all tied back to the same physical well at the same coordinates.
+
+The **measurements** themselves are the bottom level — time-stamped values recorded at a well for a specific parameter. A water table elevation reading on January 15, 2020 is one measurement; a nitrate concentration from a March 2022 sampling event is another. Measurements are stored separately by parameter, so switching from water levels to nitrate in the data type selector simply loads a different set of measurements for the same wells.
+
+This hierarchy shapes the import workflow (regions before aquifers, aquifers before wells in multi-aquifer regions) and the visualization (the sidebar tree mirrors the hierarchy, and selection at any level filters what appears on the map and chart). Computed analyses — spatial rasters, imputation models — attach at the aquifer level, since they operate on the wells and measurements within a single aquifer.
+
+## Single-Aquifer vs. Multi-Aquifer Regions
+
+When you create a region you decide, up front, whether it will contain a single aquifer or multiple aquifers. The distinction changes how the sidebar and import wizards lay themselves out, and it's worth picking the right mode from the beginning because switching later requires recreating the region.
+
+A **single-aquifer region** treats the region boundary as the aquifer boundary — one aquifer, filling the region entirely. The sidebar and the import wizards hide the aquifer level in this mode to simplify the workflow: you move directly from region to wells without an aquifer-import step, and every well gets the same aquifer assignment automatically. This mode is appropriate when your study area covers a single geologic unit or when the aquifer distinction doesn't matter to the analysis you're doing.
+
+A **multi-aquifer region** has aquifer boundaries as a separate layer. You upload them as a GeoJSON or shapefile containing one polygon feature per aquifer, and the application uses those polygons to assign wells to aquifers via point-in-polygon tests as the wells are imported. Measurements inherit their aquifer assignment from their well. Multi-aquifer mode is appropriate when your region contains distinct geologic units you want to analyze separately — separate interpolated surfaces per aquifer, one aquifer's trends compared to another, and so on.
 
 ## Data Types
 
-Every measurement in Aquifer Analyst belongs to a **data type**. Three categories of data types coexist:
+Every measurement in Aquifer Analyst belongs to a **data type** — the parameter being measured. Water table elevation is the default, and for water quality work the application ships with a built-in catalog of roughly 38 standardized parameters (nitrate, arsenic, pH, dissolved oxygen, and the rest of the parameters most groundwater programs track). The catalog keeps parameter definitions consistent across regions: nitrate in one region has the same name, same unit, and same regulatory reference values as nitrate in another, so cross-region comparison works without any manual reconciliation. Parameters specific to your region that aren't in the catalog — specialized organic compounds, or parameters reported using non-standard conventions like hardness expressed as CaCO3 — can be defined as custom data types scoped to that region.
 
-- **Water Table Elevation (WTE)** is the built-in default — water level relative to a datum, code `wte`. Every region implicitly has WTE available.
-- **Catalog parameters** are a curated set of standardized water quality parameters (nitrate, arsenic, pH, dissolved oxygen, and ~35 others) defined globally in `public/data/catalog_wq.json`. Their code, name, and unit are fixed across regions so cross-region comparisons stay meaningful.
-- **Custom data types** are non-catalog parameters specific to a region (e.g. trichloroethane, hardness reported as CaCO3). They live in each region's `region.json` under `customDataTypes` and are managed through the data type editor.
+The data type selector in the toolbar switches between every parameter that has data in the current region. Changing the selection updates every downstream view: the map re-colors well markers by the number of observations for the new parameter, the chart switches to show that parameter's values at the selected wells, any exports operate on the new parameter's data, and the tab strip on the chart relabels itself accordingly. Spatial analyses and imputation models are parameter-specific — a kriging surface of nitrate concentration is a separate analysis from a kriging surface of water table elevation, and loading one from the sidebar automatically switches the data type selector to match, keeping the entire interface coherent.
 
-A catalog or custom data type "exists" in a region exactly when its measurement file (`data_{code}.csv`) is on disk. There is no pre-declaration step — importing data is what brings a type into a region. Each data type has:
-
-- **Code** — A unique identifier (lowercase alphanumeric + underscore, max 20 characters). The code determines the data file name: `data_{code}.csv`. Custom codes cannot collide with catalog codes.
-- **Name** — A human-readable label displayed in the UI.
-- **Unit** — The measurement unit. For catalog parameters this is fixed; for customs you set it yourself.
-
-The toolbar's data type selector lets you switch between types. The map, chart, and sidebar all update to reflect the selected data type. For a deeper dive on catalog parameters, smart well discovery, and the Water Quality Portal integration, see [Water Quality Data](water-quality.md).
-
-## File Storage
-
-All data lives in the `public/data/` directory, organized by region:
-
-```
-public/data/
-└── {region-id}/
-    ├── region.json          # Region metadata
-    ├── region.geojson       # Region boundary polygon
-    ├── aquifers.geojson     # Aquifer boundary polygons
-    ├── wells.csv            # Well locations
-    ├── data_wte.csv         # Water table elevation measurements
-    ├── data_salinity.csv    # Custom data type measurements
-    ├── {aquifer-slug}/
-    │   ├── raster_wte_*.json    # Spatial analysis results
-    │   └── model_wte_*.json     # Imputation model results
-```
-
-Each region folder is self-contained. You can back up, share, or delete a region by working with its folder directly.
-
-## Single-Unit vs. Multi-Unit Regions
-
-When creating a region, you choose between:
-
-- **Multi-unit** — The region contains multiple aquifer subdivisions. You upload aquifer boundaries separately and assign wells to aquifers during import.
-- **Single-unit** — The region is treated as a single aquifer. An aquifer is created automatically from the region boundary. The aquifer level is hidden in the sidebar and import wizards to simplify the workflow.
+Parameters show up in the selector only when there's actual data behind them. Catalog parameters are globally standardized but don't appear in a region's dropdown until you've imported measurements for them in that region; custom types work the same way. Importing data is what brings a parameter into a region, and deleting its data is what removes it. The [Water Quality Data](water-quality.md) page covers the catalog model and parameter handling in detail.
 
 ## Coordinate Reference Systems
 
-Aquifer Analyst works in WGS 84 (EPSG:4326) — standard latitude/longitude coordinates. When you upload spatial data in a different coordinate reference system, the app automatically detects and reprojects:
+Aquifer Analyst works internally in WGS 84 latitude/longitude — the same coordinate system used by GPS and most web mapping services. All stored data is in WGS 84, and all visualizations use it. You don't generally have to think about coordinate systems when importing data, because the application handles reprojection automatically for the formats that carry their own coordinate metadata. GeoJSON files are reprojected using the `crs` property embedded in the file; shapefiles are reprojected using the `.prj` file packaged alongside in the ZIP archive. The reprojection itself uses the proj4 library and supports essentially every coordinate system in common use.
 
-- **GeoJSON** — CRS detected from the `crs` property in the file.
-- **Shapefiles** — CRS detected from the `.prj` file included in the ZIP archive.
+For CSV imports — wells or measurements with latitude and longitude columns — the import wizards include a coordinate system picker that defaults to WGS 84. If your CSV actually uses a projected system instead (UTM, State Plane, a national grid like JAD2001 for Jamaica), the picker offers every common option and an Auto-detect button that tries the most likely systems for the region and picks the one whose coordinates fall inside the region boundary. A small row preview shows what the first row's coordinates look like after conversion, with a green check or amber warning indicating whether the result lands inside the region. The application will also run Auto-detect automatically once per file when the WGS 84 default obviously fails, so most projected-coordinate CSVs simply work without your touching the picker at all.
 
-Reprojection uses the [proj4](https://github.com/proj4js/proj4js) library. If the CRS cannot be detected, the app assumes WGS 84.
+The coordinate handling is most likely to trip you up when the source file is ambiguous — no `.prj` in the shapefile, no `crs` in the GeoJSON, and a CSV picker left on WGS 84 when the coordinates are actually in State Plane. In practice this situation shows up visually and quickly: wells appear in the wrong place on the map, or the row preview warns that the first row lands outside the region. The Auto-detect button is usually the quickest recovery.
+
+## Where Data Comes From
+
+Data reaches Aquifer Analyst through three main paths. The first and most general is **file import** — you upload CSV files for wells and measurements or a GeoJSON or shapefile for region and aquifer boundaries, and the import wizards walk through mapping your columns to the fields the application needs. Details are in the [Managing Data](managing-data.md) page.
+
+For regions that overlap the United States, two additional paths are available as tabs inside the import wizards. The **USGS Water Data API** serves as a source for water-level measurements at USGS-monitored wells. You can pull both the well locations and their water-level histories directly, with the application converting USGS's depth-below-surface readings into water table elevations using each well's ground surface elevation. A quick-refresh mode pulls only records newer than your most recent existing measurement, which is useful for keeping a dataset current without re-downloading old data. The **Water Quality Portal** serves as a source for water quality data; it's a federated system that aggregates analytical results from USGS, EPA, USDA STEWARDS, and over 400 other public and private monitoring programs, so a single WQP download typically returns data from many agencies combined. Both remote sources are gated to U.S.-overlapping regions because that's where their coverage exists.
+
+Whichever path you use, the imported data feeds the same downstream machinery. A smart well discovery pipeline resolves source rows to wells — matching by ID, by name, or by proximity — and creates new wells on the fly for source rows whose coordinates don't fall within any existing well's neighborhood. A column mapping editor translates measurement column names into standardized parameter codes, leaning on the parameter catalog to suggest targets automatically. Quality cleanup logic drops rows that can't be parsed, that fall outside the region, or that duplicate existing data. The [Managing Data](managing-data.md) and [Water Quality Data](water-quality.md) pages walk through these pieces in depth.
