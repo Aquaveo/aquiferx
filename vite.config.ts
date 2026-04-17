@@ -298,6 +298,67 @@ function saveDataPlugin(): Plugin {
       });
 
       // GET /api/gldas-proxy?url={encodedUrl} — proxy GLDAS THREDDS requests for CORS
+      // Proxy for the Water Quality Portal. WQP doesn't send
+      // Access-Control-Expose-Headers, so the browser hides count
+      // headers (Total-Result-Count, Total-Site-Count, etc.) from JS
+      // even though they're in the response. We forward the request
+      // server-side, then re-emit those headers with the proper expose
+      // header. Also avoids future CORS surprises like the HEAD-403
+      // gotcha.
+      server.middlewares.use('/api/wqp-proxy', async (req, res) => {
+        if (req.method !== 'GET') {
+          res.statusCode = 405;
+          res.end('Method not allowed');
+          return;
+        }
+        try {
+          const url = new URL(req.url || '', 'http://localhost');
+          const targetUrl = url.searchParams.get('url');
+          const headersOnly = url.searchParams.get('headersOnly') === '1';
+          if (!targetUrl || !targetUrl.startsWith('https://www.waterqualitydata.us/')) {
+            res.statusCode = 400;
+            res.end('Missing or non-WQP url parameter');
+            return;
+          }
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 120000);
+          try {
+            const response = await fetch(targetUrl, { signal: controller.signal });
+            clearTimeout(timeout);
+            // Copy headers we care about (counts + content)
+            const passthrough = [
+              'content-type',
+              'total-site-count', 'nwis-site-count', 'storet-site-count',
+              'total-activity-count', 'nwis-activity-count', 'storet-activity-count',
+              'total-result-count', 'nwis-result-count', 'storet-result-count',
+            ];
+            for (const h of passthrough) {
+              const v = response.headers.get(h);
+              if (v) res.setHeader(h, v);
+            }
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Expose-Headers', passthrough.join(','));
+            res.statusCode = response.status;
+            if (headersOnly) {
+              // Cancel the upstream body stream so we don't pay for the
+              // full CSV download just to read count headers.
+              try { await response.body?.cancel(); } catch {}
+              res.end('');
+            } else {
+              const body = await response.text();
+              res.end(body);
+            }
+          } catch (fetchErr: any) {
+            clearTimeout(timeout);
+            res.statusCode = 502;
+            res.end(`WQP proxy error: ${fetchErr.message || fetchErr}`);
+          }
+        } catch (err) {
+          res.statusCode = 500;
+          res.end(String(err));
+        }
+      });
+
       server.middlewares.use('/api/gldas-proxy', async (req, res) => {
         if (req.method !== 'GET') {
           res.statusCode = 405;

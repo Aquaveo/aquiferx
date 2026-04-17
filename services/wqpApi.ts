@@ -15,7 +15,16 @@
 import { ParameterCatalog } from '../types';
 import { parseCSV } from './importUtils';
 
-const BASE_URL = 'https://www.waterqualitydata.us/data';
+const WQP_ORIGIN = 'https://www.waterqualitydata.us/data';
+
+/** All WQP requests go through the Vite-side proxy at /api/wqp-proxy.
+ *  WQP doesn't send Access-Control-Expose-Headers, so the count
+ *  headers (Total-Result-Count, Total-Site-Count) are hidden from
+ *  browser JS when fetched directly. The proxy re-emits them with the
+ *  correct expose header. */
+function viaProxy(wqpUrl: string): string {
+  return `/api/wqp-proxy?url=${encodeURIComponent(wqpUrl)}`;
+}
 
 // ============================================================================
 // Types
@@ -136,20 +145,17 @@ async function fetchWithRetry(url: string, init?: RequestInit, maxRetries = 3): 
  *  cheaper but WQP returns 403 for HEAD when an Origin header is
  *  present (i.e. any browser request). */
 async function getCountHeader(url: string, header: string): Promise<number> {
-  const controller = new AbortController();
-  try {
-    const res = await fetchWithRetry(url, { signal: controller.signal });
-    return parseInt(res.headers.get(header) || '0', 10) || 0;
-  } finally {
-    controller.abort();
-  }
+  // Append &headersOnly=1 so the proxy skips the body download.
+  const u = `${url}${url.includes('?') ? '&' : '?'}headersOnly=1`;
+  const res = await fetchWithRetry(u);
+  return parseInt(res.headers.get(header) || '0', 10) || 0;
 }
 
 export async function fetchWqpCounts(params: WqpQueryParams): Promise<WqpCounts> {
   const qs = buildQueryString(params, { mimeType: 'csv', zip: 'no' });
   const [resultCount, siteCount] = await Promise.all([
-    getCountHeader(`${BASE_URL}/Result/search?${qs}`, 'Total-Result-Count'),
-    getCountHeader(`${BASE_URL}/Station/search?${qs}`, 'Total-Site-Count'),
+    getCountHeader(viaProxy(`${WQP_ORIGIN}/Result/search?${qs}`), 'Total-Result-Count'),
+    getCountHeader(viaProxy(`${WQP_ORIGIN}/Station/search?${qs}`), 'Total-Site-Count'),
   ]);
   return { resultCount, siteCount };
 }
@@ -160,7 +166,7 @@ export async function fetchWqpCounts(params: WqpQueryParams): Promise<WqpCounts>
 
 export async function fetchWqpStations(params: WqpQueryParams): Promise<WqpStation[]> {
   const qs = buildQueryString(params, { mimeType: 'csv', zip: 'no' });
-  const res = await fetchWithRetry(`${BASE_URL}/Station/search?${qs}`);
+  const res = await fetchWithRetry(viaProxy(`${WQP_ORIGIN}/Station/search?${qs}`));
   const text = await res.text();
   if (!text.trim()) return [];
 
@@ -200,7 +206,7 @@ export async function fetchWqpStations(params: WqpQueryParams): Promise<WqpStati
 
 export async function fetchWqpResults(params: WqpQueryParams): Promise<WqpResult[]> {
   const qs = buildQueryString(params, { mimeType: 'csv', zip: 'no' });
-  const res = await fetchWithRetry(`${BASE_URL}/Result/search?${qs}`);
+  const res = await fetchWithRetry(viaProxy(`${WQP_ORIGIN}/Result/search?${qs}`));
   const text = await res.text();
   if (!text.trim()) return [];
 
