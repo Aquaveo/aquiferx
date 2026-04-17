@@ -272,13 +272,25 @@ const ImportDataHub: React.FC<ImportDataHubProps> = ({ onClose, onDataChanged, i
         }
 
         try {
-          // Collect all files under this prefix
+          // Collect all files under this prefix, normalizing region.json
+          // from the legacy dataTypes shape if needed.
           const files: { path: string; content: string }[] = [];
           for (const [path, entry] of Object.entries(zip.files)) {
             if (entry.dir) continue;
             if (path.startsWith(prefix + '/')) {
-              const relativePath = path; // e.g. "region-id/wells.csv"
-              const text = await entry.async('text');
+              const relativePath = path;
+              let text = await entry.async('text');
+              // Migrate legacy region.json: dataTypes → customDataTypes
+              if (path.endsWith('/region.json')) {
+                try {
+                  const raw = JSON.parse(text);
+                  if (Array.isArray(raw.dataTypes) && !raw.customDataTypes) {
+                    raw.customDataTypes = raw.dataTypes.filter((dt: any) => dt.code !== 'wte');
+                    delete raw.dataTypes;
+                    text = JSON.stringify(raw, null, 2);
+                  }
+                } catch {}
+              }
               files.push({ path: `data/${relativePath}`, content: text });
             }
           }
