@@ -2026,7 +2026,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
                   <details className="text-xs">
                     <summary className="cursor-pointer text-sky-700 hover:text-sky-800">Review proximity matches ({matchResults.filter(r => r.kind === 'proximity' && !r.rejected).length})</summary>
                     <p className="mt-2 text-[11px] text-slate-500">
-                      Each row below shows a source well from your CSV that was auto-matched to an existing well based on location. If a match looks wrong, click <span className="font-medium text-red-600">Reject</span> to create a new well instead.
+                      Each row below shows a {dataSource === 'wqp' ? 'WQP station' : 'source well from your CSV'} that was auto-matched to an existing well based on location. If a match looks wrong, click <span className="font-medium text-red-600">Reject</span> to create a new well instead.
                     </p>
                     <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                       {matchResults.filter(r => r.kind === 'proximity' && !r.rejected).map(r => (
