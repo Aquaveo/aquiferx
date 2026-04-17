@@ -1,48 +1,35 @@
 # Cross-Section Analysis
 
-Cross sections let you sample the raster surface along a line to create an elevation profile. This is useful for visualizing how the water table slopes across the aquifer or how it changes between two points of interest.
+A cross section samples the loaded raster along an arbitrary line on the map, producing a profile of the surface values as a function of distance along the line. For a water-table raster this is effectively a potentiometric profile — the water table's elevation plotted against distance from one end of the section to the other — and it's the standard view for reading hydraulic gradients, drawdown geometry around pumping centers, or the effect of a confining boundary on a particular transect through the aquifer.
 
-## Drawing a Cross Section
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map showing a cross-section line with A/A' labels and the corresponding profile chart below</div>
 
-1. With a raster loaded on the map, click the **Cross Section** button in the raster controls. The button highlights in blue to indicate cross-section mode is active.
-2. **Click on the map** to place the start point (**A**). A marker appears and a rubber-band line follows your cursor.
-3. **Move the mouse** to position the end point. The rubber-band line shows the proposed cross section.
-4. **Click again** to place the end point (**A'**).
+## Drawing a Section
 
-<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map showing cross-section line with A/A' labels and sight arrows</div>
+With a raster loaded, clicking the **Cross Section** button in the raster controls enters cross-section mode; the button highlights in blue to indicate the mode is active. The first click on the map places the start point of the section, labeled **A**. A rubber-band line then tracks your cursor until the second click places the end point, labeled **A'**. The final section appears as a solid dark blue line between the two points, with the A and A' labels at each end and perpendicular sight arrows indicating the section's orientation.
 
-The cross-section line appears on the map with:
+Drawing a new section replaces any section previously drawn — the application supports one active cross section at a time rather than multiple simultaneous profiles. Pressing Escape during drawing cancels and exits cross-section mode without placing the section; pressing Escape after the section is placed keeps the section drawn but exits the mode so subsequent map clicks return to their usual well-selection behavior.
 
-- **"A" and "A'" labels** at the start and end points.
-- **Perpendicular sight arrows** at both ends, indicating the orientation of the profile.
-- A solid dark blue line connecting the two points.
+## Reading the Profile
 
-Press <kbd>Escape</kbd> at any time to cancel and exit cross-section mode.
+The profile chart appears on a **Cross Section** tab in the chart panel as soon as the section is drawn. Its x-axis is distance along the section (in the region's length unit), starting at zero at point A and running to the full length at point A'. Its y-axis is the interpolated raster value at each sample point — water-table elevation for a WTE raster, concentration for a water-quality raster, whatever the underlying data type is. The profile is drawn as a continuous line with a light blue fill below it, which helps it read as a surface rather than an arbitrary curve.
 
-## The Profile Chart
+The raster is sampled at 200 evenly-spaced points along the section line. At each sample point, the value comes from a bilinear interpolation of the four surrounding grid cells in the raster — the same interpolation scheme used for the cursor tooltip on the map overlay, so the profile values at specific distances match what the tooltip shows when you hover over the map at the corresponding location. Sample points that fall outside the aquifer polygon return null values and are skipped in the chart, producing visible gaps in the profile where the section crosses out-of-aquifer territory (between two disjoint aquifer lobes, for instance).
 
-Once a cross section is drawn, a profile chart appears showing the elevation along the line.
+Hovering over the profile chart shows a tooltip with the exact distance along the section, the interpolated value at that distance, and the date of the current frame, so you can read specific values off the profile precisely.
 
-<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Cross-section profile chart showing elevation vs. distance</div>
+## Animation
 
-### Sampling
+Like the map overlay and the other chart tabs, the cross-section profile updates live as the raster animation plays or the frame slider is scrubbed. Each frame's profile is computed from that frame's raster, so you see the section's shape evolve through time. Playing the animation with a cross section active turns into a compact visualization of how the section has changed — watching a cone of depression deepen or a recharge front migrate, for example, plays out as a moving vertical signature in the profile.
 
-The raster is sampled at **200 evenly spaced points** along the cross-section line. At each sample point, the value is determined by **bilinear interpolation** of the four surrounding grid cells. Sample points that fall outside the aquifer mask return null and are not plotted.
+## Practical Placement
 
-### Chart Features
+A few patterns for placing useful cross sections:
 
-- **X-axis** — Distance along the cross section, in the region's length unit (feet or meters).
-- **Y-axis** — Interpolated value (e.g., water table elevation).
-- **Fill area** — A light blue filled region below the profile curve.
-- **Tooltip** — Hover to see the exact distance, value, and date at any point along the line.
+**Perpendicular to expected flow directions.** The hydraulic gradient reads as the slope of the profile curve, so a section perpendicular to flow lines shows the gradient in the flow direction at every point along the section. This is the default orientation for most diagnostic work.
 
-### Animation Sync
+**Through well clusters.** A section that passes through a row of wells lets you compare the interpolated surface directly with the underlying observations (visible on the map as markers). Mismatches between the profile and a well's actual value at the well's location indicate either that the interpolation is under-constrained in that area or that the well's value is an outlier relative to its neighbors.
 
-The cross-section profile updates in sync with the raster animation. As you play through frames or scrub the timeline, the profile redraws to show the surface along the same line at each time step. This lets you observe how the cross-sectional shape changes over time — for example, watching a cone of depression form and recover.
+**Across pumping centers.** Placing a section across an active pumping well and extending it outward in each direction captures the drawdown cone's cross-sectional shape. Running the animation reveals how the cone has developed over time and whether it's deepening, widening, or recovering.
 
-## Tips
-
-- Draw cross sections perpendicular to expected flow directions to see the hydraulic gradient.
-- Place cross sections through well clusters to compare the interpolated surface with measured values.
-- Use cross sections before and after pumping events to visualize drawdown effects.
-- Draw multiple cross sections by repeating the drawing process — each new cross section replaces the previous one.
+**Across confining boundaries.** A section that crosses a known confining feature — a fault, an impermeable contact, a lithologic boundary — reveals whether the water-table surface shows a discontinuity there. A visible step in the profile at a known boundary is itself a useful validation of the interpolation; a smooth profile across a known boundary may indicate that the well network is too sparse to resolve the feature.

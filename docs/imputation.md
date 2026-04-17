@@ -1,184 +1,130 @@
 # Imputing Data Gaps
 
-Groundwater monitoring records often have gaps — wells may be measured infrequently, monitoring may start and stop, or sensors may fail. Aquifer Analyst's **Impute Data** feature uses machine learning to fill these gaps, producing continuous monthly estimates for every well in an aquifer.
+Groundwater monitoring records are rarely complete. Wells get measured on irregular schedules, monitoring programs start and stop, funding changes, sensors fail, and the net result is a time series with gaps of months or years between contiguous runs of observations. For any analysis that benefits from continuous input — spatial interpolation at evenly-spaced frames, trend work over a uniform window, comparison across wells that happen to be measured on different schedules — those gaps have to be filled somehow. Aquifer Analyst's **Impute Data** workflow does this with a two-layer approach: a smooth interpolation through the measured intervals, and a machine-learning model that predicts values in the gaps and extrapolates beyond the last measurement.
 
-## Overview
-
-The imputation pipeline combines two techniques:
-
-1. **PCHIP interpolation** — Fills short gaps between actual measurements with smooth curves.
-2. **Extreme Learning Machine (ELM)** — A neural network trained on climate data that predicts water levels where PCHIP cannot reach (before the first measurement, after the last, or across large gaps).
-
-The result is a monthly time series for each well that blends measured data (via PCHIP) with model predictions (via ELM).
+The two layers handle different parts of the record. Within a well's measurement span, PCHIP interpolation produces monthly values that follow the actual observations closely. Outside that span — before the earliest measurement, after the latest, or across gaps longer than a configurable threshold — an Extreme Learning Machine (ELM) trained on soil moisture data from NASA's Global Land Data Assimilation System (GLDAS) fills in predictions based on climate signals that correlate with water table behavior at the well. The combined output is a continuous monthly series across your chosen date range, with the boundary between measurement-driven and model-driven regions smoothed so it doesn't jump visibly.
 
 ## Launching the Wizard
 
-Click the **Impute Data** button in the toolbar. The wizard guides you through two steps.
+Click the **Impute Data** button in the toolbar to open the imputation wizard. The wizard has two steps: the first collects the output date range and the qualification criteria for wells; the second asks for a title and confirms the parameters before running.
 
-<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Imputation wizard Step 1 showing date range and well options</div>
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Imputation wizard step 1 showing date range controls and well qualification filters</div>
 
-## Step 1: Wells & Options
+### Choosing the output range and qualifying wells
 
-### Output Date Range
+The **Start Date** and **End Date** at the top of step 1 control the span of the output — the period over which the model will produce monthly predictions. Both dates are clipped to the GLDAS data availability window (approximately 1948 through the most recent GLDAS release, usually a month or two before present), since the model can't produce predictions outside the range where it has climate features to condition on. Plus and minus one-year buttons next to each date make quick adjustments easy.
 
-Set the **Start Date** and **End Date** for the model output. These dates are constrained to the available GLDAS data range (approximately 1948 to present). Use the ±1 year buttons for quick adjustments.
+Below the dates, the **Min Samples / Well** control sets the minimum number of actual measurements a well must have to be included in the imputation run. Wells with fewer than that many measurements are excluded — the ELM needs enough training data to fit, and wells with one or two observations don't give a regression anything to work with. The default of five is a practical minimum for reasonable model fits; raising it to ten or fifteen excludes more wells but produces tighter per-well R² values.
 
-The wizard displays the available GLDAS date range and clips your selection to fit.
+A real-time count of qualifying wells updates as you adjust the threshold, and a data density histogram below shows how many qualifying wells have measurements in each six-month bin across the output window. A bin that reads zero or near-zero is a stretch where even PCHIP won't have anything to interpolate from; seeing those gaps up front helps calibrate expectations for the output.
 
-### Well Qualification
+### Gap detection thresholds
 
-- **Min Samples / Well** — Minimum number of measurements a well must have to be included in the model (default: 5, range: 2–500).
-- Wells with fewer measurements are excluded from the imputation.
+Two parameters control the handoff between the PCHIP phase and the ELM phase. The **Gap Size (days)** threshold defines what counts as "too big to interpolate"; gaps in a well's measurement record that exceed this threshold are filled by the ELM model instead of by PCHIP. The default of 730 days (about two years) is a reasonable middle ground — shorter gaps are usually well-behaved for interpolation, while gaps of two or more years can span enough climatic variability that a pure interpolation is likely to miss real behavior.
 
-The wizard shows a real-time count of qualified wells and a data density histogram (wells per 6-month bin).
-
-### Gap Detection
-
-- **Gap Size (days)** — Threshold for what constitutes a "large gap" in the data (default: 730 days, ~2 years). Gaps larger than this are filled by the ELM model rather than PCHIP interpolation.
-- **Pad Size (days)** — Padding applied at the edges of large gaps (default: 180 days, ~6 months). PCHIP extends this far into a gap before yielding to the ELM model, creating a smoother transition.
+The **Pad Size (days)** controls the transition zone at each edge of a large gap. PCHIP continues for this distance past the nearest measurement into the gap, and the ELM fills only the interior. The default of 180 days produces a smooth blend that avoids a visible step at the boundary; larger pads push more of the gap back to PCHIP, while smaller pads give the model more room to work but risk a more visible seam.
 
 ### Preview
 
-A PCHIP preview canvas at the bottom shows the measurement coverage for all qualified wells, helping you verify your settings.
+A preview strip at the bottom of step 1 shows the PCHIP coverage for every qualifying well as a set of horizontal bars. Runs of filled color indicate periods where PCHIP can interpolate; gaps between the filled segments are what the ELM will fill. This is mostly a sanity check — if the preview shows widespread sparse coverage across all wells, either the minimum sample threshold is set too high or the aquifer simply doesn't have enough historical data for a productive imputation.
 
-## Step 2: Title & Summary
+## The Second Step and the Run
 
-Enter a **Title** for the model. The title is auto-slugified to a filename: `model_wte_{slug}.json`. Review the summary of all parameters, then click **Run** to start the imputation.
+Step 2 is short. Enter a title for the model — something descriptive like "Water Level 2024 Imputation" or "Nitrate ELM Run" — and review the summary of parameters below it. The title becomes the display label in the sidebar; the filename is derived from the title with a slug transformation.
 
-### Running
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Imputation wizard step 2 showing the title field, parameter summary, and log viewer during a run</div>
 
-A progress bar shows the computation status. A real-time log viewer (styled as a dark terminal) displays processing messages, including per-well R² and RMSE metrics. Green entries indicate good model performance; red entries flag errors.
+Clicking **Run** starts the imputation. A progress bar tracks the overall run, and a dark-terminal-style log viewer shows real-time processing messages — GLDAS fetch status, per-well training R² and RMSE values, warnings when a well fails to converge. Green log entries indicate successful training; red entries flag errors or poor fits. A typical run processes dozens of wells per minute, so an aquifer with a few hundred qualifying wells completes in a few minutes.
 
-## How It Works
+## How the Model Works
 
-### PCHIP Phase
+The imputation pipeline runs in three phases: a PCHIP interpolation pass over each well's measured data, a GLDAS fetch and feature assembly phase that builds the training matrix, and a per-well ELM training and prediction phase. The final output blends the first and third.
 
-For each qualified well, PCHIP (Piecewise Cubic Hermite Interpolating Polynomial) interpolation generates smooth monthly values between the first and last measurement dates. PCHIP preserves the shape of the data — it does not overshoot or oscillate.
+### The PCHIP phase
 
-Within a well's measurement range, PCHIP values are used wherever measurements are available. For large gaps (exceeding the gap size threshold), PCHIP values are blanked out in the interior of the gap (minus the pad size at each edge), leaving room for the ELM model to fill.
+For each qualifying well, the pipeline fits a Piecewise Cubic Hermite Interpolating Polynomial through the well's measurements and samples it at monthly intervals between the earliest and latest measurement dates. PCHIP is monotonicity-preserving, which is the property that matters for groundwater data — it produces a smooth curve that doesn't overshoot between points the way an unconstrained cubic spline often does, so the interpolation respects the actual shape of the data rather than inventing peaks or troughs that aren't there.
 
-### GLDAS Climate Features
+Within the well's measurement span, PCHIP values are taken as-is for gaps smaller than the gap-size threshold. For gaps that exceed the threshold, PCHIP values are blanked out in the interior (minus the pad at each edge), leaving a region that will be filled by the ELM. The edges of every large gap retain PCHIP values out to the pad distance, so the model's output transitions smoothly from measurement-driven to climate-driven.
 
-The ELM model uses soil moisture data from the **Global Land Data Assimilation System (GLDAS)** as input features. GLDAS provides monthly gridded climate and hydrology data from NASA.
+### GLDAS features
 
-For each aquifer, the pipeline fetches soil moisture data at the aquifer's centroid location:
+The ELM's input features come from NASA's Global Land Data Assimilation System (GLDAS), a monthly gridded climate and hydrology dataset with global coverage. For each aquifer, the pipeline fetches a monthly time series of soil moisture at the aquifer's centroid. Soil moisture is the single most informative GLDAS variable for unconfined water-table work — it correlates with recharge signals, runoff, and seasonal climate swings that translate (with lag) into water-table variability.
 
-| Feature | Description |
-|---------|-------------|
-| `soilw` | Monthly soil moisture (mm) |
-| `soilw_yr01` | 1-year rolling average |
-| `soilw_yr03` | 3-year rolling average |
-| `soilw_yr05` | 5-year rolling average |
-| `soilw_yr10` | 10-year rolling average |
+Five soil moisture features are computed: the raw monthly value, plus one-year, three-year, five-year, and ten-year rolling averages. The rolling averages capture different temporal scales. The one-year average smooths seasonal swings and reveals the underlying annual pattern; the three- and five-year averages pick up multi-year drought-and-recovery cycles; the ten-year average reflects longer climate oscillations and provides a slow-moving baseline. Each feature enters the model separately, letting the ELM learn how each time scale contributes at each well.
 
-The rolling averages capture different temporal scales — seasonal patterns (1-year), multi-year trends (3-year), longer oscillations (5-year), and decadal trends (10-year).
+### Feature vector
 
-### Feature Assembly
+For each month in the training window, the ELM sees a 19-element feature vector assembled from:
 
-For each month in the training period, a 19-element feature vector is assembled:
+- Five z-scored soil moisture features (raw, plus the four rolling averages), z-scored using the global mean and standard deviation across the aquifer's full GLDAS time series.
+- A min-max-scaled normalized year index that carries the overall temporal position.
+- Twelve one-hot month indicators that let the model learn month-specific offsets independent of the climate signal.
+- A constant 1.0 bias.
 
-| Features | Count | Description |
-|----------|-------|-------------|
-| GLDAS soil moisture | 5 | Z-scored (global mean/std across all wells) |
-| Normalized year | 1 | Min-max scaled over the date range |
-| One-hot month | 12 | Binary encoding of the calendar month |
-| Bias | 1 | Constant value of 1.0 |
+The one-hot month encoding is important because it lets the ELM learn that (say) February values are systematically different from August values at a particular well, independent of what the climate features are doing. This captures the phase relationship between climate drivers and the water table at each well — useful for wells where the response lags the climate signal by several months.
 
-### ELM Architecture
+### The ELM itself
 
-The Extreme Learning Machine is a single-hidden-layer neural network with a unique training approach — the input weights are randomly initialized and never updated. Only the output weights are learned.
+An Extreme Learning Machine is a single-hidden-layer neural network with an unusual training procedure. The input-to-hidden weights and hidden-layer biases are sampled randomly from a Gaussian distribution at the start of training and are never updated. Only the hidden-to-output weights are learned, and they're solved analytically via ridge regression rather than optimized iteratively.
 
-**Network structure:**
+Structurally, the network has 19 input neurons (one per feature), 500 hidden neurons with ReLU activations, and one output neuron that predicts the water level. The hidden layer activations are computed once per training point:
 
-- **Input layer**: 19 features
-- **Hidden layer**: 500 neurons with ReLU activation
-- **Output layer**: 1 neuron (predicted water level)
+\[
+\mathbf{H} = \text{ReLU}(\mathbf{X} \cdot \mathbf{W}_{in} + \mathbf{b})
+\]
 
-**Training process:**
-
-1. Random input weights \(\mathbf{W}_{in}\) and biases \(\mathbf{b}\) are generated (normal distribution).
-2. Hidden layer activation: \(\mathbf{H} = \text{ReLU}(\mathbf{X} \cdot \mathbf{W}_{in} + \mathbf{b})\)
-3. Output weights are solved analytically via ridge regression:
+and the output weights come from the closed-form ridge-regression solution:
 
 \[
 \mathbf{W}_{out} = (\mathbf{H}^T \mathbf{H} + \lambda \mathbf{I})^{-1} \mathbf{H}^T \mathbf{y}
 \]
 
-where \(\lambda = 100\) is the regularization parameter.
+with \(\lambda = 100\) acting as a regularization parameter that stabilizes the inversion and prevents overfitting. The whole training step is a single matrix operation, so an ELM fits orders of magnitude faster than a network trained with backpropagation. For the per-well setup — where the model is trained once per well, on at most a few hundred monthly training points — the speed is what makes the workflow practical.
 
-This is much faster than iterative training (like backpropagation) because it solves for the optimal output weights in a single step.
+### Per-well training
 
-### Per-Well Training
+Each qualifying well gets its own independently-trained ELM. The pipeline uses that well's PCHIP-interpolated values (at the months where GLDAS data is available) as training targets, z-scoring them with the well's own mean and standard deviation so the model's output is on a normalized scale during training. The trained model then predicts the full GLDAS range — including the gaps and the extrapolation regions — and the predictions are un-normalized back to the original water-level scale.
 
-Each well gets its own ELM model:
+Per-well rather than per-aquifer training is important because the relationship between soil moisture and water-table response varies from well to well. Wells in recharge areas respond quickly; wells in long-flow-path discharge areas respond slowly and out of phase. Wells under pumping stress may not correlate with climate drivers at all. Training independently lets each well's model discover whatever relationship actually applies at that location, rather than forcing a single aquifer-wide fit that averages over heterogeneous behavior.
 
-1. PCHIP values at months with valid GLDAS data form the training targets.
-2. Targets are z-scored using per-well mean and standard deviation.
-3. The ELM is trained on these normalized targets.
-4. Predictions are made for all months in the GLDAS range, then denormalized back to the original scale.
+### Combining the two
 
-### Combined Output
+The output for each well and month is the PCHIP value if one exists (measurement-supported periods, plus the pad zones at the edges of large gaps) and the ELM prediction otherwise (gap interiors, and any extrapolation before or after the measurement span). The combined series is what gets stored and what appears when you load the model from the sidebar.
 
-The final output for each well and month is:
+## Viewing the Results
 
-- **PCHIP value** if available (measurement-supported intervals)
-- **ELM prediction** otherwise (gaps, extrapolation before/after measurements)
+Completed imputation models appear in the sidebar under the aquifer they were run for. Clicking the model loads it — the chart switches to show each selected well's combined time series, the legend shows the well names, and two quality metrics appear as badges in the chart header.
 
-This combined series provides a continuous monthly record across the full output date range.
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Model chart showing combined PCHIP+ELM curves with R² and RMSE badges</div>
 
-## Viewing Results
+The chart offers two display modes. **Combined mode** — the default — draws the PCHIP portion in red and the ELM portion in blue on a single continuous curve. The two colors make it visually obvious which parts of the series are supported by measurements and which are model predictions; a well with lots of red and a short blue segment at the start is mostly measurement-driven, while a well with a large blue fill in the middle is substantially model-driven.
 
-After the imputation completes, the model appears in the sidebar under the selected aquifer. Click it to load the results into the time series chart.
+**Uncombined mode** overlays both a PCHIP curve and an ELM prediction across the full range of each, with the actual measurement points as green dots. This is useful for verifying model quality — when ELM predictions track closely with PCHIP over periods where both are available, the model has learned something sensible from the climate features; where the two diverge, the model's predictions for the gap regions are worth scrutinizing.
 
-<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Model time series showing combined PCHIP and ELM curves with metrics</div>
+### Quality metrics
 
-### Display Modes
+Two metrics appear as badges in the chart header when a model well is selected. **R²** is the coefficient of determination, measuring how much of the variance in the training targets the model explains. Values above 0.7 typically indicate a good climate-driven fit; values below 0.5 suggest that soil moisture alone doesn't explain the well's behavior well. **RMSE** is the root-mean-squared error in the region's length unit (feet or meters), representing the average prediction error magnitude. Both metrics are computed on the training set in the well's original (denormalized) scale.
 
-The model time series chart offers two display modes:
+Wells with low R² are not necessarily bugs in the imputation — they're signals about the well's physical behavior. A pumping well under active irrigation may show almost no climate correlation. A well in a confined aquifer may lag seasonal signals by years. A well with a mix of pumping and recharge-driven behavior may have a genuinely low climate-driven signal that the model can't improve on. The processing log preserves per-well R² and RMSE values, which is useful for flagging which wells in the run are reliable model predictions and which are closer to the PCHIP envelope with climate-shaped extrapolation.
 
-#### Combined Mode
+### Smoothing overlay
 
-- **Red line** — PCHIP interpolation (where measurements supported it)
-- **Blue line** — ELM predictions (gap-filled regions)
-- **Orange dashed line** — Moving average smoothing (optional)
+The chart's **Smooth** toggle applies a Nadaraya-Watson Gaussian kernel smoothing to the combined output, with a configurable window in months. This is useful when the combined curve has month-to-month wiggles driven by the climate features that you don't care about for the analysis at hand. The smoothed curve appears as an orange dashed overlay; a twelve-month window is a reasonable default for de-seasoning, while longer windows emphasize multi-year trends.
 
-The combined line seamlessly blends PCHIP and ELM — PCHIP is used wherever available, and ELM fills the rest.
+## Using Imputation Output Downstream
 
-#### Uncombined Mode
+An imputation model can feed a spatial analysis. When you launch the spatial analysis wizard on an aquifer that has a completed model, the temporal-method selector offers a "Model" option that pulls the combined imputation output at each well instead of interpolating on-the-fly from the raw measurements. This produces raster surfaces that benefit from the gap-filled record — areas where measurements are sparse in time don't produce spatial holes at animation frames.
 
-- **Red line** — PCHIP values across the full range
-- **Blue line** — ELM predictions across the full range
-- **Green dots** — Original measurement data points
-
-This mode shows both signals independently, letting you compare where PCHIP and ELM agree or diverge.
-
-### Metrics
-
-Two quality metrics are displayed as badges in the chart header:
-
-| Metric | Description |
-|--------|-------------|
-| **R²** | Coefficient of determination (0 to 1). Higher is better. Measures how well the ELM model explains the variance in the training data. |
-| **RMSE** | Root Mean Squared Error in the region's length unit (ft or m). Lower is better. Represents the average prediction error magnitude. |
-
-These metrics are computed on the training set (PCHIP values where measurements exist) in the original (denormalized) units.
-
-### MAvg Smoothing
-
-Toggle the **Smooth** checkbox and adjust the **Smooth Months** slider to apply Nadaraya-Watson kernel smoothing to the combined output. This uses a Gaussian kernel to produce a smoother curve that dampens short-term fluctuations. The smoothed curve is overlaid as an orange dashed line.
-
-### GSE Reference
-
-If the selected well has a ground surface elevation, a brown dashed **GSE line** is shown as a reference for how close the water table is to the surface.
-
-### Processing Log
-
-Click the log expander to view the full processing log from the imputation run. This includes per-well R² and RMSE values, which can help identify wells where the model performed poorly.
+The caveat is that the raster surface inherits the model's uncertainty. A frame drawn entirely from ELM predictions is as good as the ELM predictions themselves, which is to say, only as reliable as the climate-to-water-level relationship at each well. The R² badges on the chart and in the processing log are the main diagnostic for deciding whether a given model is appropriate to use for spatial work.
 
 ## Tips
 
-- **Low R²** (< 0.5) at a well may indicate that soil moisture alone doesn't explain water level variations at that location. Local pumping, irrigation, or geology may be dominant factors.
-- **High RMSE** relative to the measurement range suggests the model struggles with that well's dynamics. Consider whether the well has enough training data.
-- Use the **gap size** parameter to control the tradeoff between PCHIP and ELM. A smaller gap size means more of the record is filled by PCHIP (which closely follows measurements) rather than the model.
-- The **pad size** controls the transition zone between PCHIP and ELM. Larger pads give PCHIP more influence at gap boundaries.
-- Imputation models can be used as input to spatial analysis (select "Model" as the temporal method) to produce raster surfaces that benefit from gap-filled data.
+A few patterns worth knowing:
+
+**Low R² at most wells** often means soil moisture isn't the dominant driver for the aquifer — pumping, irrigation return flow, or confined-aquifer isolation may be running the show. The model will still produce estimates but they shouldn't be over-interpreted. Consider whether a different temporal smoothing (a simple PCHIP with short-gap bridging) might serve the downstream analysis as well.
+
+**A few wells with very high RMSE** can usually be traced to either unusual individual wells (wells with measurements in odd units, wells near an active pumping center) or to the minimum-sample threshold being too low for the aquifer's measurement density. Bumping the minimum to ten or fifteen samples typically weeds out the worst fits.
+
+**Gap size** is the main lever for the PCHIP-vs-ELM trade-off. Lowering it pushes more of the record to PCHIP, which follows measurements closely but extrapolates poorly. Raising it gives the model more room to work and produces a more uniform set of predictions across wells, at the cost of some measurement fidelity in longer gaps.
+
+**Pad size** controls the visual transition. If you see visible seams where PCHIP meets ELM in the chart, raising the pad to 360 days or more smooths the join at the cost of shrinking the ELM's active region.
