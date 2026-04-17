@@ -178,12 +178,12 @@ This page addresses common issues you may encounter when using Aquifer Analyst.
 
 ### WQP Estimate or Download fails with HTTP 403
 
-**Cause**: WQP's CORS configuration rejects browser requests that include the `Origin` header for certain HTTP methods. The application proxies all WQP traffic through a Vite-side endpoint (`/api/wqp-proxy`) to avoid this; if you see a 403, the proxy may not be running.
+**Cause**: The application routes WQP traffic through a small server-side helper to work around browser cross-origin restrictions on the Water Quality Portal's response headers. If the dev server hasn't been restarted since the helper was added, that route may not be active yet.
 
 **Solution**:
 
-- Restart the dev server (`npm run dev`). The proxy is registered as middleware and only activates after restart.
-- Confirm the request URL in the browser network tab starts with `/api/wqp-proxy?url=...` rather than going directly to `waterqualitydata.us`.
+- Stop the dev server and start it again (`npm run dev`). Server-side routes only register at startup.
+- If the problem persists, check whether you can reach `https://www.waterqualitydata.us/` directly in the browser to rule out a network-level block.
 
 ### Estimate count looks much higher than the imported count
 
@@ -207,14 +207,14 @@ This page addresses common issues you may encounter when using Aquifer Analyst.
 - Switch the Sources radio to **All agencies** to include EPA STORET and state programs.
 - Widen the date range. WQP data density varies enormously by location and parameter; many wells have only a handful of samples spread over decades.
 
-### WQP measurements look duplicated or implausibly clustered
+### WQP returns no measurements for a parameter you know is present
 
-**Cause**: The catalog's preferred sample fraction for a parameter doesn't match what your data sources reported. The dedup logic kept the first row per (site, date, parameter) but dropped rows with a different fraction; if all rows in your data had a non-matching fraction, all would be dropped.
+**Cause**: The standard sample fraction for that parameter (filtered for most dissolved species) may not match what your data sources reported. The cleanup step drops rows whose sample fraction doesn't match the standard for the parameter; if every row in your data has a non-matching fraction, every row is dropped.
 
 **Solution**:
 
-- Check the data quality panel — if "dropped — sample fraction didn't match catalog preference" is high, the catalog's fraction preference may be too strict for your region's data conventions.
-- The right fix is usually to revisit the catalog entry rather than adapting per-import. File an issue describing the parameter and which fraction your sources actually report.
+- Look at the cleanup panel after the download — if "dropped — sample fraction didn't match" is high relative to the total, the standard may be too strict for the data your region's agencies report.
+- The right fix is usually to update the catalog's standard for the parameter rather than working around it per-import. Raise this as a bug describing the parameter and what fraction your sources actually use.
 
 ## General Tips
 

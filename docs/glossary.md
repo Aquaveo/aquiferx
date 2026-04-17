@@ -8,13 +8,13 @@ Key terms used throughout Aquifer Analyst and this documentation.
 :   A subsurface layer of rock or sediment that holds and transmits groundwater. In Aquifer Analyst, aquifers are spatial subdivisions within a region, each defined by a boundary polygon.
 
 **aqx- ID**
-:   The prefix used for well identifiers that the application generates automatically when importing measurements from a source that has no usable well_id column. Format: `aqx-{name-slug}-{lat}N{lng}W`, or `aqx-{lat}N{lng}W` if no name is available. Distinguishes locally-generated IDs from agency-assigned ones (USGS, WQP) and user-supplied IDs.
+:   The prefix used for well identifiers that the application generates automatically when importing measurements from a source with no usable well ID. Examples: `aqx-spring-garden-18.12N77.46W` (with a name) or `aqx-18.12N77.46W` (no name). The `aqx-` prefix lets you distinguish locally-generated IDs from agency-assigned ones (USGS, WQP) and from IDs you supplied yourself.
 
 **Bilinear Interpolation**
 :   A method for estimating a value at a point using the four surrounding grid cell values. Used when sampling raster surfaces for cross-section profiles and cursor tooltips.
 
 **Catalog (Parameter Catalog)**
-:   The global, curated list of standardized water quality parameters defined in `public/data/catalog_wq.json`. Each catalog entry has a fixed code, name, unit, group, MCL/WHO references, and WQP characteristic mapping. Catalog parameters are implicitly available in every region; a parameter exists in a region exactly when its `data_{code}.csv` file is on disk.
+:   The built-in, curated list of standardized water quality parameters that ships with the application — roughly 38 of the most commonly measured groundwater parameters (nitrate, arsenic, pH, dissolved oxygen, etc.). Each catalog parameter has a fixed name, unit, category, and (where applicable) MCL/WHO drinking-water reference values. Catalog parameters are implicitly available in every region; a parameter shows up in a region's data type dropdown after you've imported measurements for it. The full catalog can be browsed read-only from the Catalog Browser modal.
 
 **CRS (Coordinate Reference System)**
 :   A system that defines how spatial coordinates map to locations on Earth. Aquifer Analyst works internally in WGS 84 (EPSG:4326) and automatically reprojects data from other CRS definitions.

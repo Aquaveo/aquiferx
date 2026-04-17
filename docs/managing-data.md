@@ -203,7 +203,7 @@ The editor includes a **Browse Catalog** link that opens a read-only viewer of e
 1. Enter a **Name** (e.g., "BOD5", "Trichloroethane").
 2. A **Code** is auto-generated from the name. You can override it manually. Codes must be lowercase alphanumeric plus underscores, max 20 characters, and **cannot collide with any catalog code**. The editor blocks collisions with a suggestion to import the column as the catalog parameter instead.
 3. Enter the **Unit** (e.g., `mg/L`, `ppm`, `μg/L`).
-4. Click Save. The custom type is recorded in `region.json`. It will appear in the data type dropdown once a `data_{code}.csv` file exists for it — created automatically when you import measurements for this type.
+4. Click Save. The custom type is now recorded for the region, but it won't appear in the data type dropdown until you actually import measurements for it.
 
 The `wte` code is reserved and cannot be used.
 
