@@ -127,6 +127,8 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   const [wqpIsDownloading, setWqpIsDownloading] = useState(false);
   const [wqpQualityReport, setWqpQualityReport] = useState<WqpDataQualityReport | null>(null);
   const [showWqpPicker, setShowWqpPicker] = useState(false);
+  const [wqpScope, setWqpScope] = useState<'region' | 'aquifer'>('region');
+  const [wqpScopeAquiferId, setWqpScopeAquiferId] = useState('');
 
   // Duplicate handling strategy when multiple rows share the same well+date
   type DuplicateStrategy = 'average' | 'maximum' | 'keep-all';
@@ -609,11 +611,43 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
   // ---- WQP download (Phase 4c) ----
 
+  // Compute a bbox for the aquifer scope. Tighter than regionBounds
+  // when the region's geojson contains lots of empty polygon space.
+  // Returns [minLng, minLat, maxLng, maxLat] (WQP order).
+  const wqpScopeBBox = useMemo<[number, number, number, number] | null>(() => {
+    const features = aquifersGeojson?.type === 'FeatureCollection'
+      ? aquifersGeojson.features
+      : aquifersGeojson ? [aquifersGeojson] : [];
+    const wantId = wqpScope === 'aquifer' ? wqpScopeAquiferId : null;
+    let minLat = Infinity, minLng = Infinity, maxLat = -Infinity, maxLng = -Infinity;
+    let any = false;
+    const visit = (coords: any) => {
+      if (!Array.isArray(coords)) return;
+      if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+        const [lng, lat] = coords;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        any = true;
+      } else for (const c of coords) visit(c);
+    };
+    for (const f of features) {
+      if (wantId && String(f.properties?.aquifer_id || '') !== wantId) continue;
+      visit(f.geometry?.coordinates);
+    }
+    if (!any) {
+      // No aquifer geometry — fall back to region bounds
+      return [regionBounds[1], regionBounds[0], regionBounds[3], regionBounds[2]];
+    }
+    return [minLng, minLat, maxLng, maxLat];
+  }, [aquifersGeojson, wqpScope, wqpScopeAquiferId, regionBounds]);
+
   // Build the WqpQueryParams shared across count and download. WQP uses
-  // [west, south, east, north]; regionBounds is [minLat, minLng, maxLat,
-  // maxLng] so flip accordingly.
+  // [west, south, east, north]; we use the scoped aquifer bbox.
   const wqpQueryParams = useMemo<WqpQueryParams | null>(() => {
-    if (!catalog || wqpSelectedCodes.length === 0) return null;
+    if (!catalog || wqpSelectedCodes.length === 0 || !wqpScopeBBox) return null;
+    if (wqpScope === 'aquifer' && !wqpScopeAquiferId) return null;
     const characteristicNames: string[] = [];
     for (const code of wqpSelectedCodes) {
       const cn = catalog.parameters[code]?.wqp?.characteristicName;
@@ -621,13 +655,13 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     }
     if (characteristicNames.length === 0) return null;
     return {
-      bBox: [regionBounds[1], regionBounds[0], regionBounds[3], regionBounds[2]],
+      bBox: wqpScopeBBox,
       characteristicNames,
       startDateLo: wqpStartDate || undefined,
       startDateHi: wqpEndDate || undefined,
       providers: wqpProvider === 'NWIS' ? 'NWIS' : undefined,
     };
-  }, [catalog, wqpSelectedCodes, wqpStartDate, wqpEndDate, wqpProvider, regionBounds]);
+  }, [catalog, wqpSelectedCodes, wqpStartDate, wqpEndDate, wqpProvider, wqpScopeBBox, wqpScope, wqpScopeAquiferId]);
 
   const handleWqpEstimate = async () => {
     if (!wqpQueryParams) return;
@@ -745,13 +779,28 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         fetchWqpResults(wqpQueryParams),
       ]);
 
+      // Polygon clip — WQP queries by bounding box, but the user
+      // expects results inside the actual aquifer polygons. Drop
+      // stations outside the chosen polygon(s); cascade the drop to
+      // their results.
       const stationMap = new Map<string, { lat: number; lng: number; name: string }>();
+      let droppedStations = 0;
       for (const s of stations) {
+        if (aquifersGeojson) {
+          const aq = assignWellToAquifer(s.lat, s.lng, aquifersGeojson);
+          if (!aq) { droppedStations++; continue; }
+          if (wqpScope === 'aquifer' && aq !== wqpScopeAquiferId) { droppedStations++; continue; }
+        }
         stationMap.set(s.siteId, { lat: s.lat, lng: s.lng, name: s.siteName });
       }
+      const inScopeResults = results.filter(r => stationMap.has(r.siteId));
 
       const charMap = buildCharacteristicMap(catalog);
-      const { kept, report } = dedupWqpResults(results, charMap);
+      const { kept, report } = dedupWqpResults(inScopeResults, charMap);
+      // Annotate the report so the cleanup panel shows polygon-clip stats too
+      if (droppedStations > 0) {
+        report.details.unshift(`${droppedStations} station${droppedStations === 1 ? '' : 's'} dropped — outside aquifer polygon${wqpScope === 'aquifer' ? '' : 's'}`);
+      }
       setWqpQualityReport(report);
 
       buildWqpFile(kept, stationMap, wqpSelectedCodes);
@@ -1789,6 +1838,40 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
               )}
             </div>
 
+            {/* Scope */}
+            {!singleUnit && aquiferList.length > 0 && (
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Scope</label>
+                <div className="space-y-1">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="wqp-scope" checked={wqpScope === 'region'}
+                      onChange={() => { setWqpScope('region'); setWqpScopeAquiferId(''); setWqpCounts(null); }}
+                      className="text-blue-600" />
+                    <span className="text-sm text-slate-700">All aquifers in region <span className="text-xs text-slate-400">(stations outside aquifer polygons are dropped)</span></span>
+                  </label>
+                  {aquiferList.length > 1 && (
+                    <>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="wqp-scope" checked={wqpScope === 'aquifer'}
+                          onChange={() => { setWqpScope('aquifer'); setWqpCounts(null); }}
+                          className="text-blue-600" />
+                        <span className="text-sm text-slate-700">Specific aquifer</span>
+                      </label>
+                      {wqpScope === 'aquifer' && (
+                        <select value={wqpScopeAquiferId} onChange={e => { setWqpScopeAquiferId(e.target.value); setWqpCounts(null); }}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm ml-6">
+                          <option value="">-- Select Aquifer --</option>
+                          {aquiferList.map(a => (
+                            <option key={a.id} value={a.id}>{a.name || a.id}</option>
+                          ))}
+                        </select>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Date range */}
             <div className="mb-3 grid grid-cols-2 gap-2">
               <div>
@@ -1842,7 +1925,8 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
             {wqpCounts && (
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-                Estimated: <strong>{wqpCounts.resultCount.toLocaleString()}</strong> result{wqpCounts.resultCount === 1 ? '' : 's'} at <strong>{wqpCounts.siteCount.toLocaleString()}</strong> site{wqpCounts.siteCount === 1 ? '' : 's'}.
+                Estimated: <strong>{wqpCounts.resultCount.toLocaleString()}</strong> result{wqpCounts.resultCount === 1 ? '' : 's'} at <strong>{wqpCounts.siteCount.toLocaleString()}</strong> site{wqpCounts.siteCount === 1 ? '' : 's'} (bounding box).
+                <p className="mt-1 text-blue-700">Stations outside the aquifer polygon{wqpScope === 'aquifer' ? '' : 's'} are dropped after download — actual count will be lower.</p>
                 {wqpCounts.resultCount > 500_000 && (
                   <p className="mt-1 text-amber-700 font-medium">⚠ Large download — narrow the date range, fewer parameters, or smaller area before pulling.</p>
                 )}
