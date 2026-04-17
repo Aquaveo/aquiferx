@@ -1,8 +1,16 @@
 # Water Quality Data
 
-Aquifer Analyst was originally built around water-level measurements, where the only data type was water table elevation (WTE). The application now also handles a much broader set of water quality (WQ) parameters — pH, nitrate, arsenic, dissolved oxygen, and dozens more. This page describes how WQ data fits into the application, where it can come from, and what to expect along the way.
+Water quality (WQ) data describes the chemistry of groundwater at monitored wells: how much nitrate, how much arsenic, what pH, what specific conductance, and so on. Aquifer Analyst lets you import, view, and analyze WQ measurements alongside water-level data, using the same well network and the same map, chart, and spatial-analysis tools.
 
-WQ data behaves quite differently from water-level data. Every WQ measurement is keyed by a parameter — the substance being measured — where each parameter has its own unit, its own regulatory thresholds, and its own data conventions. A reading of `5.2` is meaningless without knowing whether it's mg/L of nitrate or μS/cm of conductivity. WQ data is also typically much sparser than water-level data: many wells have only a handful of WQ samples spread over decades, and the parameters measured at one well may be entirely different from the parameters measured at a neighbor. Public WQ data in the United States is also collected by hundreds of agencies — USGS, EPA, state programs, tribal nations — while water-level data is centralized at USGS. The features on this page accommodate all of those differences.
+A few of the things you can do with WQ data in the application:
+
+- **Compare measured concentrations against regulatory thresholds.** The built-in parameter catalog records U.S. EPA Maximum Contaminant Levels (MCL) and World Health Organization (WHO) drinking-water guideline values for the parameters that have them, so you can see where your wells stand relative to formal benchmarks.
+- **Track contamination over time.** Plot nitrate, arsenic, or any other parameter as a time series at one well or several, and watch how concentrations evolve. Spatial interpolation extends the picture across an entire aquifer.
+- **Characterize aquifer chemistry.** Dissolved major ions — calcium, magnesium, sodium, chloride, sulfate, bicarbonate — tell you about rock-water interactions, residence time, and mixing between aquifer compartments.
+- **Monitor salinity and intrusion.** Track total dissolved solids or specific conductance in coastal aquifers or other settings where saline water is encroaching on a freshwater resource.
+- **Compare across wells, aquifers, and regions.** Because the application standardizes parameter definitions globally, nitrate in one region directly compares with nitrate in another — same name, same unit, same reference values.
+
+WQ data behaves differently from water-level data in three ways that shape the workflow. Every WQ measurement is keyed by a parameter — the substance being measured — where each parameter has its own unit, regulatory thresholds, and data conventions; a reading of `5.2` is meaningless without knowing whether it's mg/L of nitrate or μS/cm of conductivity. WQ data is typically much sparser than water-level data, with many wells holding only a handful of samples spread over decades, and the parameters measured at one well may differ entirely from a neighbor. And in the United States, public WQ data is collected by hundreds of agencies (USGS, EPA, state programs, tribal nations) rather than centralized at USGS. The features described on this page accommodate all of those differences.
 
 ## Overview
 
@@ -63,9 +71,9 @@ The wizard's middle and lower sections show different panels depending on which 
 
 ## Smart Well Discovery
 
-Earlier versions of Aquifer Analyst required every well to exist before you could import measurements for it — a strict prerequisite that often made imports painful. Real-world datasets rarely arrive that cleanly. A spreadsheet from a state monitoring program might list 200 wells by name and coordinates, most of which match wells you already have but with slightly different spellings or no shared identifier at all. Forcing manual reconciliation row by row was tedious and error-prone, and it discouraged people from importing data they could otherwise use.
+Real-world data rarely arrives with perfectly clean well identifiers. A spreadsheet from a state monitoring program might list 200 wells by name and coordinates, most of which correspond to wells you already have but with slightly different spellings or no shared ID at all. A WQP download for an aquifer can return stations that are completely new to your region. Reconciling all of that by hand would be tedious and error-prone.
 
-The smart well discovery pipeline solves this by accepting any combination of well identifiers — ID, name, latitude/longitude — on a per-row basis and resolving each row to either an existing well in the region or a new well that the importer creates on the fly. For CSV uploads, you turn the pipeline on by checking **"Measurements file includes well locations"** at the top of the upload tab. For WQP downloads, the pipeline is always on, since every WQP station carries lat/long.
+Smart well discovery handles it for you. Each row in your source data is resolved to either an existing well in the region or a new well that the importer creates on the fly, using whatever combination of identifiers the row carries — well ID, well name, latitude/longitude, or any subset. For CSV uploads, you turn the pipeline on by checking **"Measurements file includes well locations"** at the top of the upload tab. For WQP downloads, the pipeline is always on, since every WQP station carries lat/long.
 
 <!-- screenshot: Well matching panel showing the five-cell counter (by ID, by name, by proximity, new, unmatched) -->
 
