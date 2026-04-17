@@ -913,8 +913,9 @@ The **Target dropdown** is the key new element. Options:
 - Unit mismatch (CSV header unit disagrees with catalog) flagged with a warning; values import as-is, no auto-conversion.
 - `suggestDataTypesFromColumns` source categories cleaned up; catalog matches win first.
 
-**Phase 3.5e: Cleanup** — in progress
-- Delete any code that relied on the old "user pre-declares types before import" assumption.
+**Phase 3.5e: Cleanup** — **done**
+- Delete any code that relied on the old "user pre-declares types before import" assumption. **done** — removed the stale `isMultiType` auto-match effect in `MeasurementImporter.tsx` that iterated region `dataTypes` to seed `typeColumnMapping`; the column-mapping editor's sync effect already drives this in the opposite direction and was being clobbered by the legacy matcher.
+- Audit confirmed: `types.ts`, `services/catalog.ts`, `services/dataLoader.ts`, `App.tsx`, and the importers all read from `customDataTypes` + `effectiveDataTypes` only; legacy `dataTypes` references are isolated to the in-memory migration normalizers (`dataLoader.ts`, `ImportDataHub.tsx`, `RegionImporter.tsx`, `DataTypeEditor.tsx`'s cross-region suggestions, `MeasurementImporter.tsx`'s other-region seed list), which stay intentionally for backwards-compat with unmigrated `region.json` files on disk.
 - Update CLAUDE.md conventions (data type section). **done**
 
 ### Risks
