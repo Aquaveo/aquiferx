@@ -6,7 +6,7 @@ The **Active Wells** feature shows which wells contributed data to the spatial i
 
 With a raster loaded on the map, click the **Active Wells** button in the raster controls. The display changes to highlight only the wells that had valid measurements (or interpolated values) at the current time step.
 
-<!-- screenshot: Map showing active wells highlighted for a specific time step -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map showing active wells highlighted for a specific time step</div>
 
 ## What "Active" Means
 

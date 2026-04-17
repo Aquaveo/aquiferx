@@ -2,7 +2,7 @@
 
 Spatial analysis in Aquifer Analyst transforms point-based well measurements into continuous raster surfaces that cover an entire aquifer. This enables you to visualize spatial patterns, animate changes over time, compute storage volumes, and draw cross-section profiles.
 
-<!-- screenshot: Raster overlay on map showing interpolated water table surface -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Raster overlay on map showing interpolated water table surface</div>
 
 ## Launching the Wizard
 
@@ -16,7 +16,7 @@ Click the **Spatial Analysis** button in the toolbar. The wizard guides you thro
 
 The temporal step controls how measurement time series at each well are sampled to produce values for spatial interpolation.
 
-<!-- screenshot: Spatial analysis wizard Step 1 showing temporal options -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Spatial analysis wizard Step 1 showing temporal options</div>
 
 ### Date Range
 

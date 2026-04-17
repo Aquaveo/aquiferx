@@ -11,7 +11,7 @@ Click the **Trend** button in the toolbar to toggle trend analysis mode. When ac
 3. A color-coded legend appears showing the trend categories.
 4. The time series chart for selected wells displays trend lines.
 
-<!-- screenshot: Map in trend mode showing color-coded wells with legend -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map in trend mode showing color-coded wells with legend</div>
 
 ## How Trends Are Computed
 

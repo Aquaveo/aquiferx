@@ -2,7 +2,7 @@
 
 All data import, export, and deletion in Aquifer Analyst flows through the **Import Data Hub** — a central dialog accessed by clicking the **Manage Data** button in the toolbar.
 
-<!-- screenshot: Import Data Hub showing region list and action buttons -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Import Data Hub showing region list and action buttons</div>
 
 ## Import Data Hub
 
@@ -24,7 +24,7 @@ Sections that aren't applicable to the current state (e.g., the aquifer card in 
 
 Click **New Region** in the Import Data Hub to launch the region creation wizard.
 
-<!-- screenshot: New region wizard showing name, unit, and single-unit options -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> New region wizard showing name, unit, and single-unit options</div>
 
 **Step 1: Region Details**
 
@@ -91,7 +91,7 @@ Name changes are not applied until you click **Save**. Deletions take effect imm
 
 Click the wells section in the hub to launch the Well Importer. Wells can be loaded from a CSV file or downloaded from the USGS Water Data API.
 
-<!-- screenshot: Well importer showing CSV upload and USGS download options -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Well importer showing CSV upload and USGS download options</div>
 
 ### Uploading from CSV
 
@@ -134,7 +134,7 @@ Click the measurements section in the hub to launch the Measurement Importer. Th
 
 The remainder of this section covers the upload path in summary form. For the catalog model, smart well discovery, the column mapping editor, and the WQP download flow in detail, see [Water Quality Data](water-quality.md).
 
-<!-- screenshot: Measurement importer showing the three data source tabs -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Measurement importer showing the three data source tabs</div>
 
 ### Uploading from CSV
 
@@ -184,7 +184,7 @@ For regions overlapping the United States, the **Water Quality (WQP)** tab downl
 
 The Column Mapper modal appears during well and measurement imports. It presents your CSV's detected columns alongside the expected fields.
 
-<!-- screenshot: Column mapper modal showing dropdown mapping -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Column mapper modal showing dropdown mapping</div>
 
 For each required field (marked with a red asterisk), select the matching column from your CSV using the dropdown. The mapper auto-detects common column names (e.g., `latitude` maps to `lat`), but you can override any mapping.
 
@@ -196,7 +196,7 @@ The Data Type Editor manages **custom (non-catalog) data types** for the current
 
 The editor includes a **Browse Catalog** link that opens a read-only viewer of every catalog entry, so you can check whether a parameter you're about to add as a custom is already covered.
 
-<!-- screenshot: Data Type Editor showing list of customs with add/edit/delete -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Data Type Editor showing list of customs with add/edit/delete</div>
 
 ### Adding a Custom Type
 

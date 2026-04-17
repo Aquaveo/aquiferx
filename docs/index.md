@@ -2,7 +2,7 @@
 
 **Aquifer Analyst** is a web-based groundwater data visualization and analysis application. It provides a complete toolkit for loading, exploring, and analyzing groundwater monitoring data — from raw well measurements to spatial interpolation, trend analysis, and machine-learning-based data imputation.
 
-<!-- screenshot: Main application interface showing map with wells, sidebar, and time series chart -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Main application interface showing map with wells, sidebar, and time series chart</div>
 
 ## Key Features
 

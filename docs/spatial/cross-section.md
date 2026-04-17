@@ -9,7 +9,7 @@ Cross sections let you sample the raster surface along a line to create an eleva
 3. **Move the mouse** to position the end point. The rubber-band line shows the proposed cross section.
 4. **Click again** to place the end point (**A'**).
 
-<!-- screenshot: Map showing cross-section line with A/A' labels and sight arrows -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map showing cross-section line with A/A' labels and sight arrows</div>
 
 The cross-section line appears on the map with:
 
@@ -23,7 +23,7 @@ Press <kbd>Escape</kbd> at any time to cancel and exit cross-section mode.
 
 Once a cross section is drawn, a profile chart appears showing the elevation along the line.
 
-<!-- screenshot: Cross-section profile chart showing elevation vs. distance -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Cross-section profile chart showing elevation vs. distance</div>
 
 ### Sampling
 

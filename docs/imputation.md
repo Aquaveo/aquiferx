@@ -15,7 +15,7 @@ The result is a monthly time series for each well that blends measured data (via
 
 Click the **Impute Data** button in the toolbar. The wizard guides you through two steps.
 
-<!-- screenshot: Imputation wizard Step 1 showing date range and well options -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Imputation wizard Step 1 showing date range and well options</div>
 
 ## Step 1: Wells & Options
 
@@ -130,7 +130,7 @@ This combined series provides a continuous monthly record across the full output
 
 After the imputation completes, the model appears in the sidebar under the selected aquifer. Click it to load the results into the time series chart.
 
-<!-- screenshot: Model time series showing combined PCHIP and ELM curves with metrics -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Model time series showing combined PCHIP and ELM curves with metrics</div>
 
 ### Display Modes
 

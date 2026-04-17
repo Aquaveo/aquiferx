@@ -91,7 +91,7 @@ When you open the app for the first time, you will see:
 - An **interactive map** in the center.
 - A **toolbar** along the top with buttons for managing data, running analyses, and switching data types.
 
-<!-- screenshot: Initial app view with empty state or sample data loaded -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Initial app view with empty state or sample data loaded</div>
 
 If sample data is included with the repository, you will see one or more regions listed in the sidebar. Click a region name to expand it and view its aquifers and wells.
 

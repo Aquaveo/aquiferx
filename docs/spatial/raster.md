@@ -6,7 +6,7 @@ After running a spatial analysis, the resulting raster is loaded as a color-mapp
 
 In the sidebar, expand the selected aquifer to see the list of computed raster analyses. Click on a raster name to load it onto the map. The active raster is highlighted in the sidebar.
 
-<!-- screenshot: Map with raster overlay showing color-coded water table surface -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map with raster overlay showing color-coded water table surface</div>
 
 ## Color Ramps
 
@@ -41,7 +41,7 @@ Contour lines help identify:
 
 If the raster contains multiple time frames (i.e., the temporal interval is less than the full date range), you can animate through them.
 
-<!-- screenshot: Raster playback controls showing play/pause, frame slider, and date display -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Raster playback controls showing play/pause, frame slider, and date display</div>
 
 ### Playback Controls
 
@@ -82,7 +82,7 @@ Right-click a raster and select "Delete" to remove it. This deletes the raster J
 
 When a raster is loaded, a **Raster Statistics** tab becomes available in the chart panel. This chart displays summary statistics computed from the well values at each raster time step, giving you a compact view of how the distribution of values across the aquifer changes over time.
 
-<!-- screenshot: Raster statistics chart showing mean line with std dev band -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Raster statistics chart showing mean line with std dev band</div>
 
 ### What Is Computed
 

@@ -67,7 +67,7 @@ Choose the volume unit for the storage curve display:
 
 The storage curve is a line chart displayed below the map when a raster is loaded.
 
-<!-- screenshot: Storage analysis curve showing cumulative volume change over time with synch line -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Storage analysis curve showing cumulative volume change over time with synch line</div>
 
 ### Reading the Curve
 

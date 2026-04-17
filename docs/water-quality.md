@@ -24,7 +24,7 @@ A typical workflow for getting water quality data into a region looks like this:
 
 The rest of this page walks through each of those steps in detail, plus the concepts that hold them together. The single most important concept to absorb up front is that the application uses a built-in **catalog of standardized water quality parameters** to keep things consistent across regions. The catalog drives the data type dropdown, the column-mapping suggestions in the CSV upload flow, and the parameter picker in the WQP download flow. Once you understand the catalog, the rest of the WQ workflow makes sense.
 
-<!-- screenshot: Add Measurements wizard with the three data source tabs visible -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Add Measurements wizard with the three data source tabs visible</div>
 
 ## Standardized Parameters and the Catalog
 
@@ -41,7 +41,7 @@ You can see the full list of standardized parameters at any time through the **C
 
 The browser groups parameters by category (Physical, Nutrient, Major Ion, Minor Metal, Microbiological, etc.), supports search by name or code, and shows the MCL and WHO values alongside each entry. Clicking a row reveals additional detail useful when downloading from the Water Quality Portal — specifically the WQP characteristic name and the preferred sample fraction for that parameter. The browser is informational only; you cannot add, edit, or remove catalog parameters from the application.
 
-<!-- screenshot: Catalog Browser modal with one group expanded -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Catalog Browser modal with one group expanded</div>
 
 ### Custom (non-catalog) parameters
 
@@ -65,7 +65,7 @@ Water quality data enters a region through the **Add Measurements** wizard, the 
 
 The CSV upload and the WQP download both produce water quality data. They feed into the same downstream machinery — the well-matching panel, the data quality cleanup, the append/replace logic — so once you've learned the workflow for one, the other only differs in how the rows arrive at the wizard.
 
-<!-- screenshot: Add Measurements wizard with the WQP tab selected, showing the three tabs across the top -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Add Measurements wizard with the WQP tab selected, showing the three tabs across the top</div>
 
 The wizard's middle and lower sections show different panels depending on which tab you're on and how far along you are. The next section — Smart Well Discovery — describes the shared machinery that activates once data is in the wizard, regardless of which source it came from. After that, separate sections cover the CSV upload tab and the WQP download tab in turn.
 
@@ -75,7 +75,7 @@ Real-world data rarely arrives with perfectly clean well identifiers. A spreadsh
 
 Smart well discovery handles it for you. Each row in your source data is resolved to either an existing well in the region or a new well that the importer creates on the fly, using whatever combination of identifiers the row carries — well ID, well name, latitude/longitude, or any subset. For CSV uploads, you turn the pipeline on by checking **"Measurements file includes well locations"** at the top of the upload tab. For WQP downloads, the pipeline is always on, since every WQP station carries lat/long.
 
-<!-- screenshot: Well matching panel showing the five-cell counter (by ID, by name, by proximity, new, unmatched) -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Well matching panel showing the five-cell counter (by ID, by name, by proximity, new, unmatched)</div>
 
 ### How rows match wells
 
@@ -91,7 +91,7 @@ For each distinct well in your source data, the pipeline tries four strategies i
 
 The well matching panel summarizes the result of all this in a five-cell counter at the top: how many rows matched by ID, how many by name, how many by proximity, how many became new wells, and how many couldn't be resolved at all (rows without any usable identifier or coordinates). Proximity matches are flagged for your review — an expandable list shows each one with the distance, and you can reject individual matches if a spatial coincidence looks wrong. Two genuinely different wells at the same address, for example, would proximity-match to each other; clicking **Reject** treats the source row as a new well instead.
 
-<!-- screenshot: Proximity match review list with a Reject button on one row -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Proximity match review list with a Reject button on one row</div>
 
 ### Identifiers for new wells
 
@@ -110,7 +110,7 @@ A common surprise in well matching is that source coordinates may be in a projec
 
 If the WGS 84 default doesn't work — meaning the preview indicates the coordinates land outside the region — an **Auto-detect** button tries the most likely projected systems for the region and picks the one that fits. The application also runs auto-detect automatically once per loaded file when the default fails, so most projected-coordinate CSVs simply work without your touching the picker.
 
-<!-- screenshot: Coordinate System picker showing the auto-detect button and the inside-region preview -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Coordinate System picker showing the auto-detect button and the inside-region preview</div>
 
 ### Same well on multiple rows
 
@@ -120,13 +120,13 @@ A subtle but important detail: when the same well appears on multiple rows of yo
 
 When you upload a CSV file, the application has to translate columns whose names you didn't choose into data types it understands. This happens in three panels that the wizard shows in sequence after you pick the file: a panel for the structural columns, a panel for data columns, and the well matching panel described above.
 
-<!-- screenshot: Upload CSV tab showing the file picker and "Measurements file includes well locations" checkbox -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Upload CSV tab showing the file picker and "Measurements file includes well locations" checkbox</div>
 
 ### Mapping structural columns
 
 The **Map Structural Columns** panel handles the columns that describe each measurement's context: well ID, date, latitude, longitude, well name, aquifer ID. The mapper auto-detects common column names — `Latitude` maps to lat, `Sample_Date` maps to date, and so on — but you can override any mapping from a dropdown. A date format selector appears once a date column is mapped, in case auto-detection picks the wrong format for ambiguous dates.
 
-<!-- screenshot: Map Structural Columns panel with several mappings filled in -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map Structural Columns panel with several mappings filled in</div>
 
 ### Mapping data columns
 
@@ -136,7 +136,7 @@ The application proposes a target for each row using a layered matching strategy
 
 When you select a catalog target, the unit is locked to the catalog's standard unit. If your CSV header carried a different unit hint — for example, the column header says `Nitrate (μg/L)` but the catalog standard for nitrate is `mg/L` — the row displays a warning. The application does not silently convert units; it imports the values as you supplied them and surfaces the discrepancy so you can decide whether the values are correct (and the header was just inconsistent) or whether you need to fix the CSV before re-importing.
 
-<!-- screenshot: Map Data Columns panel showing rows with catalog targets, a unit warning, and the bulk toggle buttons -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map Data Columns panel showing rows with catalog targets, a unit warning, and the bulk toggle buttons</div>
 
 For a CSV with many measurement columns, three bulk toggles at the top of the panel make the choice fast: **Include all** checks every row, **Only catalog matches** checks just the rows the matcher confidently mapped to a catalog parameter, and **None** unchecks everything. You can then flip individual rows from the bulk state.
 
@@ -148,7 +148,7 @@ The Water Quality Portal (WQP) at [waterqualitydata.us](https://www.waterquality
 
 The **Water Quality (WQP)** tab in the Add Measurements wizard appears for any region whose bounding box overlaps the United States. The application treats WQP as U.S.-centric since that's where the data density actually exists, even though the API is technically open worldwide.
 
-<!-- screenshot: WQP tab showing the parameter chips, date range, sources, scope, and Estimate/Download buttons -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> WQP tab showing the parameter chips, date range, sources, scope, and Estimate/Download buttons</div>
 
 The WQP tab guides you through four decisions before downloading: which parameters, what date range, which agencies, and what spatial scope. Each is described below, in the order you'll encounter them.
 
@@ -156,7 +156,7 @@ The WQP tab guides you through four decisions before downloading: which paramete
 
 The first step is to choose what to download. Click **Pick parameters** to open a multi-select modal. The modal shows the catalog parameters that can be downloaded from WQP, grouped by category (Physical, Nutrient, Major Ion, etc.). You can select individual parameters with the row checkboxes, or use the tri-state group checkboxes to select an entire category (all nutrients, all major ions) with one click. A search box at the top filters by name. **Select all** and **None** buttons make starting from one extreme or the other quick.
 
-<!-- screenshot: WQP Parameter Picker modal with several categories expanded and parameters selected -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> WQP Parameter Picker modal with several categories expanded and parameters selected</div>
 
 Custom (non-catalog) parameters are intentionally absent from the picker. The Water Quality Portal organizes data by its own list of standardized characteristic names, and only the catalog parameters know how to map back and forth. If you have data for a custom parameter that WQP also tracks, the right path is usually to advocate for adding it to the catalog rather than working around the constraint per-import.
 
@@ -180,7 +180,7 @@ Before pulling actual data, click **Estimate** to see how much WQP is about to g
 
 > Estimated: 12,400 results at 340 sites (bounding box). Stations outside the aquifer polygons are dropped after download — actual count will be lower.
 
-<!-- screenshot: Estimate result panel showing the count summary and the polygon-clip note -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Estimate result panel showing the count summary and the polygon-clip note</div>
 
 The estimate counts what the bounding-box query would return, so two reductions happen later that the estimate can't reflect. First, the polygon clip described above usually drops some stations that were inside the rectangle but outside the actual aquifer geometry. Second, the deduplication step described below drops some result rows whose sample fractions don't match the standard for their parameter. Both reductions happen on your machine after the data arrives, so they can't be previewed — your actual import count will be lower than the estimate, sometimes substantially.
 
@@ -194,7 +194,7 @@ Once the data is in, the application does a few things in sequence: it clips sta
 
 A green file-loaded banner shows the row count, and a cleanup panel above the well-matching panel summarizes what was filtered out — how many stations were dropped by the polygon clip, how many measurement rows were dropped because their sample fraction didn't match the catalog standard for the parameter, and how many duplicates were collapsed.
 
-<!-- screenshot: Cleanup panel after a WQP download, showing rows kept vs dropped at each stage -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Cleanup panel after a WQP download, showing rows kept vs dropped at each stage</div>
 
 ### Filtering duplicates and sample fractions
 
@@ -220,7 +220,7 @@ If you find yourself wanting WQP wells without measurements, the practical worka
 
 Whether you're uploading a CSV or downloading from WQP, when the region already has data for the same parameter, the wizard offers an **Import Mode** toggle. The two modes have very different semantics.
 
-<!-- screenshot: Import Mode toggle with Append selected and the explanation text below it -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Import Mode toggle with Append selected and the explanation text below it</div>
 
 **Append** is the default and is non-destructive. The importer compares each incoming measurement's well-and-date combination against existing records; matches are skipped, and only genuinely new records are added. This is the safe choice for refreshing a dataset with newer records or for adding a parameter that wasn't previously imported. Existing data is never modified or lost.
 
@@ -246,10 +246,10 @@ A few things to keep in mind as you import water quality data:
 
 Once water quality data is imported, you select it through the data type dropdown at the top of the application. The dropdown shows every data type that has data in the current region — water table elevation plus any catalog or custom parameter you've imported. Selecting a parameter switches the entire UI: the well markers on the map are color-coded by the number of measurements available for that parameter, the time series chart shows samples for the selected parameter at the selected wells, and the export tools operate on that parameter's data.
 
-<!-- screenshot: Data type dropdown showing WTE plus several imported water quality parameters -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Data type dropdown showing WTE plus several imported water quality parameters</div>
 
 WQ visualization works the same way as water-level visualization. The chart's vertical axis adopts the parameter's standard unit (mg/L for nitrate, μS/cm for conductivity, and so on), and the chart title shows the parameter's name. Multi-well selection, smoothing, and date filtering all carry over without modification. Spatial analyses — kriging, IDW, raster animations — are also data-type-aware and operate on whichever parameter is currently selected.
 
-<!-- screenshot: Time series chart showing nitrate measurements at multiple wells with PCHIP smoothing -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Time series chart showing nitrate measurements at multiple wells with PCHIP smoothing</div>
 
 The chart UI does not currently overlay MCL or WHO thresholds as horizontal reference lines, although the catalog browser shows those values for parameters that have them. If this becomes a needed feature, the underlying data is already in place to support it.

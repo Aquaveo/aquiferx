@@ -6,7 +6,7 @@ Aquifer Analyst is a single-page web application built with React and TypeScript
 
 The application is organized into four main areas:
 
-<!-- screenshot: Annotated full interface showing all four areas -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Annotated full interface showing all four areas</div>
 
 1. **Toolbar** — The top bar contains action buttons and selectors:
     - **Data Type Selector** — Switch between measurement types (e.g., Water Table Elevation, salinity).

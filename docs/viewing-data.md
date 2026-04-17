@@ -6,7 +6,7 @@ Once data is loaded into Aquifer Analyst, you can explore it through the sidebar
 
 The sidebar on the left shows a hierarchical tree of your data:
 
-<!-- screenshot: Sidebar showing expanded region with aquifers and wells -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Sidebar showing expanded region with aquifers and wells</div>
 
 - **Regions** — Click to select. An eye icon toggles the region boundary visibility on the map.
 - **Aquifers** — Expand a region to see its aquifers. Click an aquifer to display its wells on the map. If the aquifer belongs to a region other than the currently selected one, clicking it also switches the selected region (and makes that region visible) so the map and data view follow the click.
@@ -33,7 +33,7 @@ Similarly, any imputation models for the selected aquifer are listed. Click a mo
 
 The center of the app displays an interactive Leaflet map.
 
-<!-- screenshot: Map showing wells on satellite imagery with region boundary -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map showing wells on satellite imagery with region boundary</div>
 
 ### Basemaps
 
@@ -86,7 +86,7 @@ Click a well on the map or in the sidebar. The well is highlighted and its time 
 - **Shift + Click** — Hold <kbd>Shift</kbd> and click a well to add it to (or remove it from) the current selection.
 - **Shift + Drag** — Hold <kbd>Shift</kbd> and drag a rectangle on the map to select all wells within the box.
 
-<!-- screenshot: Map showing box-drag selection with crosshair cursor and gold-ringed selected wells -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map showing box-drag selection with crosshair cursor and gold-ringed selected wells</div>
 
 Selected wells display a **gold ring** around their marker. During box-drag selection, the cursor changes to a crosshair.
 
@@ -115,7 +115,7 @@ When you load a raster or imputation model from the sidebar, the **data type sel
 
 The chart panel below the map shows measurement data for the selected well(s).
 
-<!-- screenshot: Time series chart with PCHIP curve and measurement dots -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Time series chart with PCHIP curve and measurement dots</div>
 
 ### Interpolation
 
