@@ -201,10 +201,11 @@ export function autoMapColumns(columns: string[], fileType: string): ColumnMappi
     if (gseIdx >= 0) mapping['gse'] = columns[gseIdx];
     if (aqIdIdx >= 0) mapping['aquifer_id'] = columns[aqIdIdx];
   } else if (fileType === 'measurements') {
+    // Only auto-map structural columns. Data columns (including WTE's
+    // "value" column) are handled by the detection panel.
     const wellIdIdx = lowerColumns.findIndex(c => c.includes('well') && c.includes('id') || c === 'well_id');
     const wellNameIdx = lowerColumns.findIndex(c => (c.includes('well') && c.includes('name')) || c === 'well_name' || c === 'name' || c === 'station' || c === 'station_name');
     const dateIdx = lowerColumns.findIndex(c => c === 'date' || c.includes('date'));
-    const valueIdx = lowerColumns.findIndex(c => c === 'value' || c === 'wte' || c.includes('elevation') || c.includes('level'));
     const latIdx = lowerColumns.findIndex(c => c === 'lat' || c.includes('latitude') || c === 'lat_dec' || c === 'northing' || c === 'y');
     const longIdx = lowerColumns.findIndex(c => c === 'long' || c === 'lng' || c.includes('longitude') || c === 'long_dec' || c === 'lon' || c === 'easting' || c === 'x');
     const aqIdIdx = lowerColumns.findIndex(c => c.includes('aquifer') && c.includes('id') || c === 'aquifer_id');
@@ -212,7 +213,6 @@ export function autoMapColumns(columns: string[], fileType: string): ColumnMappi
     if (wellIdIdx >= 0) mapping['well_id'] = columns[wellIdIdx];
     if (wellNameIdx >= 0) mapping['well_name'] = columns[wellNameIdx];
     if (dateIdx >= 0) mapping['date'] = columns[dateIdx];
-    if (valueIdx >= 0) mapping['value'] = columns[valueIdx];
     if (latIdx >= 0) mapping['lat'] = columns[latIdx];
     if (longIdx >= 0) mapping['long'] = columns[longIdx];
     if (aqIdIdx >= 0) mapping['aquifer_id'] = columns[aqIdIdx];

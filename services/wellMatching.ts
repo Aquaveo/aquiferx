@@ -182,10 +182,16 @@ const RESERVED_LOWER = new Set([
   'lat', 'latitude', 'lat_dec',
   'long', 'lng', 'longitude', 'long_dec', 'lon',
   'aquifer_id', 'aquifer', 'aquifer_name',
-  'gse', 'elevation', 'ground_surface_elevation', 'surface_elevation',
-  // Generic value / measurement columns — handled by the single-type
-  // legacy picker path, not the column-detection panel
-  'value', 'wte', 'water table elevation', 'measurement', 'reading',
+  'gse', 'ground_surface_elevation', 'surface_elevation',
+]);
+
+// WTE aliases — column headers that should auto-match to the built-in
+// Water Table Elevation type. WTE isn't in the catalog (it's the implicit
+// default) so it needs its own match set.
+const WTE_ALIASES = new Set([
+  'value', 'wte', 'water table elevation', 'water_table_elevation',
+  'water level', 'water_level', 'elevation', 'level',
+  'measurement', 'reading', 'head', 'water head',
 ]);
 
 function isReservedColumn(col: string): boolean {
@@ -281,6 +287,21 @@ export function suggestDataTypesFromColumns(
     const { base, unit } = parseColumnHeader(col);
     const norm = normalizeName(base);
     if (!norm) continue;
+
+    // 0. WTE — the built-in Water Table Elevation type isn't in the catalog
+    //    but matches common column names like "value", "wte", "water_level".
+    if (WTE_ALIASES.has(norm)) {
+      suggestions.push({
+        column: col,
+        code: 'wte',
+        name: 'Water Table Elevation',
+        unit: '', // unit comes from the region's lengthUnit at save time
+        headerUnit: unit,
+        source: 'catalog',
+        include: true,
+      });
+      continue;
+    }
 
     // 1. Catalog — authoritative for standard parameters
     // Match tiers: exact → chemical formula alias → Levenshtein → substring

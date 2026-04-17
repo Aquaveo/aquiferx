@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload, Calendar, MapPin, Wand2, BookOpen } from 'lucide-react';
-import { processUploadedFile, UploadedFile, saveFiles, parseDate, detectDateFormat, parseCSV, isInUS, freshFetch, assignWellToAquifer } from '../../services/importUtils';
+import { processUploadedFile, UploadedFile, saveFiles, parseDate, detectDateFormat, parseCSV, isInUS, freshFetch, assignWellToAquifer, DATE_FORMATS } from '../../services/importUtils';
 import { fetchUSGSMeasurements, validateUSGSMeasurements, USGSDataQualityReport, USGSMeasurement, USGSDataSpan, computeDataSpan, filterByDateRange, getUSGSApiKey, setUSGSApiKey } from '../../services/usgsApi';
 import { loadCatalog } from '../../services/catalog';
 import CatalogBrowser from '../CatalogBrowser';
@@ -252,22 +252,15 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         { key: 'long', label: 'Longitude', required: false },
       ]
     : [];
-  const fieldDefs = isMultiType
-    ? [
-        { key: 'well_id', label: 'Well ID', required: wellIdRequired },
-        ...smartFields,
-        { key: 'date', label: 'Date', required: true },
-        ...(!singleUnit && aquiferAssignment === 'csv-field'
-          ? [{ key: 'aquifer_id', label: 'Aquifer ID', required: false }] : []),
-      ]
-    : [
-        { key: 'well_id', label: 'Well ID', required: wellIdRequired },
-        ...smartFields,
-        { key: 'date', label: 'Date', required: true },
-        { key: 'value', label: 'Value', required: true },
-        ...(!singleUnit && aquiferAssignment === 'csv-field'
-          ? [{ key: 'aquifer_id', label: 'Aquifer ID', required: false }] : []),
-      ];
+  // Structural fields only — no Value field. Data columns (including WTE)
+  // are handled by the detection panel below the file chooser.
+  const fieldDefs = [
+    { key: 'well_id', label: 'Well ID', required: wellIdRequired },
+    ...smartFields,
+    { key: 'date', label: 'Date', required: true },
+    ...(!singleUnit && aquiferAssignment === 'csv-field'
+      ? [{ key: 'aquifer_id', label: 'Aquifer ID', required: false }] : []),
+  ];
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -283,7 +276,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         setDateFormat(detected);
       }
 
-      setShowMapper(true);
+      // Don't auto-open the modal — structural fields render inline now
     } catch (err) {
       setError(`Failed to process: ${err}`);
     }
@@ -390,6 +383,9 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   // the resulting data_{code}.csv file.
   const mappingResolvedType = (m: ColumnMapping): DataType | null => {
     if (m.target.kind === 'catalog') {
+      if (m.target.code === 'wte') {
+        return { code: 'wte', name: 'Water Table Elevation', unit: lengthUnit };
+      }
       const param = catalog?.parameters[m.target.code];
       if (!param) return null;
       return { code: m.target.code, name: param.name, unit: param.unit };
@@ -1237,8 +1233,8 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
   const isReady = file && file.mapping['date'] &&
     (hasRowIdentity || hasMatchResults || isBootstrap) &&
-    (isMultiType ? selectedTypes.every(code => typeColumnMapping[code]) : file.mapping['value']) &&
     selectedTypes.length > 0 &&
+    selectedTypes.every(code => typeColumnMapping[code]) &&
     (singleUnit || aquiferAssignment !== 'single' || selectedAquiferId) &&
     (!unmatchedInfo || unmatchedInfo.matchedCount > 0 || hasMatchResults) &&
     !hasMappingErrors;
@@ -1361,85 +1357,6 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           </div>
         )}
 
-        {/* Data type selection — legacy single/multi picker. Only appears
-            when the detection panel has no candidate columns (e.g. a CSV
-            with just well_id/date/value). When the detection panel has
-            candidates it drives type selection and this picker is hidden. */}
-        {dataSource === 'upload' && dataTypes.length > 0 && file && columnMappings.length === 0 && (
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-slate-700 mb-2">Data Type(s)</label>
-            {dataTypes.length > 1 && (
-              <label className="flex items-center gap-2 mb-2 cursor-pointer">
-                <input type="checkbox" checked={isMultiType}
-                  onChange={e => {
-                    setIsMultiType(e.target.checked);
-                    if (!e.target.checked) setSelectedTypes([selectedTypes[0] || dataTypes[0]?.code || 'wte']);
-                  }}
-                  className="text-blue-600 rounded" />
-                <span className="text-xs text-slate-600">Import multiple data types from one CSV</span>
-              </label>
-            )}
-            {isMultiType ? (
-              <div className="space-y-2">
-                {dataTypes.length > 2 && (
-                  <button
-                    onClick={() => setSelectedTypes(
-                      selectedTypes.length === dataTypes.length ? [] : dataTypes.map(dt => dt.code)
-                    )}
-                    className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    {selectedTypes.length === dataTypes.length ? 'Deselect All' : 'Select All'}
-                  </button>
-                )}
-                {dataTypes.map(dt => (
-                  <div key={dt.code}>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={selectedTypes.includes(dt.code)}
-                        onChange={() => toggleType(dt.code)} className="text-blue-600 rounded" />
-                      <span className="text-sm text-slate-700">{dt.name} ({dt.unit})</span>
-                    </label>
-                    {selectedTypes.includes(dt.code) && file && (
-                      <select
-                        value={typeColumnMapping[dt.code] || ''}
-                        onChange={e => setTypeColumnMapping(prev => ({ ...prev, [dt.code]: e.target.value }))}
-                        className="ml-6 mt-1 w-[calc(100%-1.5rem)] px-3 py-1.5 border border-slate-300 rounded-lg text-sm"
-                      >
-                        <option value="">-- Value column for {dt.code} --</option>
-                        {file.columns.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {dataTypes.map(dt => (
-                  <button
-                    key={dt.code}
-                    onClick={() => setSelectedTypes([dt.code])}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                      selectedTypes[0] === dt.code
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    {dt.name} ({dt.unit})
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* WTE depth option */}
-            {selectedTypes.includes('wte') && (
-              <label className="flex items-center gap-2 mt-2 cursor-pointer">
-                <input type="checkbox" checked={wteIsDepth}
-                  onChange={e => setWteIsDepth(e.target.checked)}
-                  className="text-blue-600 rounded" />
-                <span className="text-xs text-slate-600">Values are depth below ground surface (will convert to WTE using GSE)</span>
-              </label>
-            )}
-          </div>
-        )}
 
         {/* Import mode — show for upload and USGS when existing data */}
         {hasExistingData && (dataSource === 'upload' || dataSource === 'usgs') && (
@@ -1637,6 +1554,49 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           </div>
         )}
 
+        {/* Inline structural column mapping — replaces the popup modal */}
+        {file && dataSource === 'upload' && (
+          <div className="mb-4 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+            <p className="text-sm font-medium text-slate-700 mb-3">Map Structural Columns</p>
+            <div className="space-y-3">
+              {fieldDefs.map(col => (
+                <div key={col.key} className="flex items-center space-x-3">
+                  <label className="w-32 text-sm font-medium text-slate-700 shrink-0">
+                    {col.label}
+                    {col.required && <span className="text-red-500 ml-1">*</span>}
+                  </label>
+                  <select
+                    value={file.mapping[col.key] || ''}
+                    onChange={e => updateMapping(col.key, e.target.value)}
+                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">-- Select Column --</option>
+                    {file.columns.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+
+              {/* Date format — only when a date column is mapped */}
+              {file.mapping['date'] && (
+                <div className="flex items-center space-x-3 pt-2 border-t border-slate-200">
+                  <label className="w-32 text-sm font-medium text-slate-700 shrink-0">Date Format</label>
+                  <select
+                    value={dateFormat}
+                    onChange={e => setDateFormat(e.target.value)}
+                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    {DATE_FORMATS.map(f => (
+                      <option key={f.value} value={f.value}>{f.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Detected data types panel — per-column mapping editor */}
         {file && dataSource === 'upload' && columnMappings.length > 0 && (
           <div className="mb-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
@@ -1686,6 +1646,9 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
                         onChange={e => setMappingTarget(m.column, e.target.value)}
                         className="text-xs px-2 py-1 border border-slate-300 rounded bg-white max-w-[180px]"
                       >
+                        <optgroup label="Built-in">
+                          <option value="catalog:wte">Water Table Elevation</option>
+                        </optgroup>
                         <optgroup label="Catalog parameters">
                           {catalog && Object.keys(catalog.parameters)
                             .sort((a, b) => catalog.parameters[a].name.localeCompare(catalog.parameters[b].name))
@@ -1754,6 +1717,14 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
               <p className="text-xs text-indigo-700 mt-2">
                 {newCustomTypesToAdd.length} new custom type{newCustomTypesToAdd.length !== 1 ? 's' : ''} will be added to the region.
               </p>
+            )}
+            {selectedTypes.includes('wte') && (
+              <label className="flex items-center gap-2 mt-3 pt-3 border-t border-indigo-200 cursor-pointer">
+                <input type="checkbox" checked={wteIsDepth}
+                  onChange={e => setWteIsDepth(e.target.checked)}
+                  className="text-blue-600 rounded" />
+                <span className="text-xs text-slate-600">WTE values are depth below ground surface (will convert to elevation using GSE)</span>
+              </label>
             )}
           </div>
         )}
@@ -1846,11 +1817,6 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
                 ? `${(file.data as any[]).length} USGS measurements loaded`
                 : `${file.name} (${(file.data as any[]).length} rows)`}
             </div>
-            {dataSource === 'upload' && (
-              <button onClick={() => setShowMapper(true)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">
-                Edit Column Mapping
-              </button>
-            )}
             {unmatchedInfo && (
               <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg mt-2">
                 <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
