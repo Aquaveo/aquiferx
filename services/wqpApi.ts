@@ -129,19 +129,29 @@ async function fetchWithRetry(url: string, init?: RequestInit, maxRetries = 3): 
 // Counts (HEAD requests, headers only)
 // ============================================================================
 
-/** Issue HEAD requests to both Result and Station endpoints to estimate
- *  download size before the user commits. WQP returns total counts in
- *  response headers regardless of body, so HEAD is cheap. */
+/** Estimate download size before the user commits. WQP populates
+ *  count headers (`Total-Result-Count`, `Total-Site-Count`) on every
+ *  response — including the Result endpoint — so we issue GETs and
+ *  abort the body stream as soon as headers arrive. HEAD would be
+ *  cheaper but WQP returns 403 for HEAD when an Origin header is
+ *  present (i.e. any browser request). */
+async function getCountHeader(url: string, header: string): Promise<number> {
+  const controller = new AbortController();
+  try {
+    const res = await fetchWithRetry(url, { signal: controller.signal });
+    return parseInt(res.headers.get(header) || '0', 10) || 0;
+  } finally {
+    controller.abort();
+  }
+}
+
 export async function fetchWqpCounts(params: WqpQueryParams): Promise<WqpCounts> {
   const qs = buildQueryString(params, { mimeType: 'csv', zip: 'no' });
-  const [resultRes, stationRes] = await Promise.all([
-    fetchWithRetry(`${BASE_URL}/Result/search?${qs}`, { method: 'HEAD' }),
-    fetchWithRetry(`${BASE_URL}/Station/search?${qs}`, { method: 'HEAD' }),
+  const [resultCount, siteCount] = await Promise.all([
+    getCountHeader(`${BASE_URL}/Result/search?${qs}`, 'Total-Result-Count'),
+    getCountHeader(`${BASE_URL}/Station/search?${qs}`, 'Total-Site-Count'),
   ]);
-  return {
-    resultCount: parseInt(resultRes.headers.get('Total-Result-Count') || '0', 10) || 0,
-    siteCount: parseInt(stationRes.headers.get('Total-Site-Count') || '0', 10) || 0,
-  };
+  return { resultCount, siteCount };
 }
 
 // ============================================================================
