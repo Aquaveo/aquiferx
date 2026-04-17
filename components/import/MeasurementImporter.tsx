@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload, Calendar, MapPin, Wand2, BookOpen } from 'lucide-react';
 import { processUploadedFile, UploadedFile, saveFiles, parseDate, detectDateFormat, parseCSV, isInUS, freshFetch, assignWellToAquifer, DATE_FORMATS } from '../../services/importUtils';
 import { fetchUSGSMeasurements, validateUSGSMeasurements, USGSDataQualityReport, USGSMeasurement, USGSDataSpan, computeDataSpan, filterByDateRange, getUSGSApiKey, setUSGSApiKey } from '../../services/usgsApi';
@@ -622,6 +622,19 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     onCrsChange: () => { setMatchResults(null); setMatchSummary(null); },
   });
   const { parseRowCoords } = crs;
+
+  // Auto-run CRS detection once per loaded CSV when the default WGS84 preview
+  // lands outside the region — saves a click for projected-coordinate CSVs.
+  // Keyed on the samples reference so changing files re-arms, and user picks
+  // aren't overridden (preview.ok becomes true, or samples don't change).
+  const autoDetectedSamplesRef = useRef<unknown>(null);
+  useEffect(() => {
+    if (crsSamples.length === 0 || !crs.crsPreview) return;
+    if (crs.crsPreview.ok || crs.isAutoDetecting) return;
+    if (autoDetectedSamplesRef.current === crsSamples) return;
+    autoDetectedSamplesRef.current = crsSamples;
+    crs.handleAutoDetectCrs();
+  }, [crsSamples, crs.crsPreview, crs.isAutoDetecting, crs.handleAutoDetectCrs]);
 
   // Build SourceWellRow[] by deduplicating the CSV on well identity.
   // One match decision per unique well, not per measurement row.
@@ -1323,7 +1336,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
   return (
     <div className="fixed inset-0 z-[105] flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-bold text-slate-800">Add Measurements</h2>
@@ -1597,6 +1610,86 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           </div>
         )}
 
+        {/* Smart well matching panel — only when lat/lng are mapped */}
+        {file && dataSource === 'upload' && hasSmartColumns && (
+          <div className="mb-4 p-4 bg-sky-50 border border-sky-200 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <MapPin size={14} className="text-sky-600" />
+              <span className="text-sm font-medium text-sky-800">Well matching</span>
+            </div>
+            <p className="text-xs text-sky-700 mb-3">
+              Match source rows to existing wells by ID, name, or proximity. Unmatched rows with coordinates become new wells.
+            </p>
+
+            {/* Coordinate reference system picker */}
+            <div className="mb-3 pb-3 border-b border-sky-200">
+              <CrsPickerPanel crs={crs} />
+            </div>
+
+            <div className="flex items-center gap-2 mb-3">
+              <label className="text-xs text-slate-600">Proximity threshold (m):</label>
+              <input
+                type="number"
+                value={proximityMeters}
+                min={1}
+                max={5000}
+                onChange={e => setProximityMeters(Math.max(1, parseInt(e.target.value || '100', 10)))}
+                className="w-20 px-2 py-1 border border-sky-200 rounded text-xs"
+              />
+              <button
+                onClick={runWellMatching}
+                disabled={isMatching}
+                className="ml-auto px-3 py-1.5 bg-sky-600 text-white rounded text-xs font-medium hover:bg-sky-700 disabled:opacity-50 flex items-center gap-1"
+              >
+                {isMatching && <Loader2 size={12} className="animate-spin" />}
+                {matchResults ? 'Re-match' : 'Match wells'}
+              </button>
+            </div>
+            {matchSummary && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-5 gap-1 text-center text-xs">
+                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-slate-800">{matchSummary.byId}</div><div className="text-[10px] text-slate-500">by ID</div></div>
+                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-slate-800">{matchSummary.byName}</div><div className="text-[10px] text-slate-500">by name</div></div>
+                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-slate-800">{matchSummary.byProximity}</div><div className="text-[10px] text-slate-500">by proximity</div></div>
+                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-green-700">{matchSummary.newWells}</div><div className="text-[10px] text-slate-500">new</div></div>
+                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className={`font-bold ${matchSummary.unmatched > 0 ? 'text-red-600' : 'text-slate-400'}`}>{matchSummary.unmatched}</div><div className="text-[10px] text-slate-500">unmatched</div></div>
+                </div>
+                {matchResults && matchResults.some(r => r.kind === 'proximity' && !r.rejected) && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-sky-700 hover:text-sky-800">Review proximity matches ({matchResults.filter(r => r.kind === 'proximity' && !r.rejected).length})</summary>
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      Each row below shows a source well from your CSV that was auto-matched to an existing well based on location. If a match looks wrong, click <span className="font-medium text-red-600">Reject</span> to create a new well instead.
+                    </p>
+                    <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                      {matchResults.filter(r => r.kind === 'proximity' && !r.rejected).map(r => (
+                        <div key={r.sourceRow.sourceIndex} className="flex items-center gap-2 py-1 border-b border-sky-100 last:border-0">
+                          <span className="flex-1 text-[11px] text-slate-700">
+                            "{r.sourceRow.wellName || r.sourceRow.wellId || '(no name)'}" → <span className="font-medium">{r.existingWell?.well_name || r.existingWell?.well_id}</span>
+                            <span className="text-slate-400"> · {Math.round(r.distanceMeters || 0)}m</span>
+                          </span>
+                          <button
+                            onClick={() => toggleRejectMatch(r.sourceRow.sourceIndex)}
+                            title="Reject this match — treat the CSV row as a new well instead"
+                            className="px-2 py-0.5 text-[10px] text-red-600 border border-red-200 rounded hover:bg-red-50 hover:border-red-300 font-medium"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+                {newWellsGseProgress.total > 0 && newWellsGseProgress.done < newWellsGseProgress.total && (
+                  <p className="text-xs text-sky-700 flex items-center gap-1">
+                    <Loader2 size={10} className="animate-spin" />
+                    Fetching elevation for new wells ({newWellsGseProgress.done}/{newWellsGseProgress.total})
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Detected data types panel — per-column mapping editor */}
         {file && dataSource === 'upload' && columnMappings.length > 0 && (
           <div className="mb-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
@@ -1725,86 +1818,6 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
                   className="text-blue-600 rounded" />
                 <span className="text-xs text-slate-600">WTE values are depth below ground surface (will convert to elevation using GSE)</span>
               </label>
-            )}
-          </div>
-        )}
-
-        {/* Smart well matching panel — only when lat/lng are mapped */}
-        {file && dataSource === 'upload' && hasSmartColumns && (
-          <div className="mb-4 p-4 bg-sky-50 border border-sky-200 rounded-lg">
-            <div className="flex items-center gap-2 mb-2">
-              <MapPin size={14} className="text-sky-600" />
-              <span className="text-sm font-medium text-sky-800">Well matching</span>
-            </div>
-            <p className="text-xs text-sky-700 mb-3">
-              Match source rows to existing wells by ID, name, or proximity. Unmatched rows with coordinates become new wells.
-            </p>
-
-            {/* Coordinate reference system picker */}
-            <div className="mb-3 pb-3 border-b border-sky-200">
-              <CrsPickerPanel crs={crs} />
-            </div>
-
-            <div className="flex items-center gap-2 mb-3">
-              <label className="text-xs text-slate-600">Proximity threshold (m):</label>
-              <input
-                type="number"
-                value={proximityMeters}
-                min={1}
-                max={5000}
-                onChange={e => setProximityMeters(Math.max(1, parseInt(e.target.value || '100', 10)))}
-                className="w-20 px-2 py-1 border border-sky-200 rounded text-xs"
-              />
-              <button
-                onClick={runWellMatching}
-                disabled={isMatching}
-                className="ml-auto px-3 py-1.5 bg-sky-600 text-white rounded text-xs font-medium hover:bg-sky-700 disabled:opacity-50 flex items-center gap-1"
-              >
-                {isMatching && <Loader2 size={12} className="animate-spin" />}
-                {matchResults ? 'Re-match' : 'Match wells'}
-              </button>
-            </div>
-            {matchSummary && (
-              <div className="space-y-2">
-                <div className="grid grid-cols-5 gap-1 text-center text-xs">
-                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-slate-800">{matchSummary.byId}</div><div className="text-[10px] text-slate-500">by ID</div></div>
-                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-slate-800">{matchSummary.byName}</div><div className="text-[10px] text-slate-500">by name</div></div>
-                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-slate-800">{matchSummary.byProximity}</div><div className="text-[10px] text-slate-500">by proximity</div></div>
-                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className="font-bold text-green-700">{matchSummary.newWells}</div><div className="text-[10px] text-slate-500">new</div></div>
-                  <div className="p-1.5 bg-white rounded border border-slate-200"><div className={`font-bold ${matchSummary.unmatched > 0 ? 'text-red-600' : 'text-slate-400'}`}>{matchSummary.unmatched}</div><div className="text-[10px] text-slate-500">unmatched</div></div>
-                </div>
-                {matchResults && matchResults.some(r => r.kind === 'proximity' && !r.rejected) && (
-                  <details className="text-xs">
-                    <summary className="cursor-pointer text-sky-700 hover:text-sky-800">Review proximity matches ({matchResults.filter(r => r.kind === 'proximity' && !r.rejected).length})</summary>
-                    <p className="mt-2 text-[11px] text-slate-500">
-                      Each row below shows a source well from your CSV that was auto-matched to an existing well based on location. If a match looks wrong, click <span className="font-medium text-red-600">Reject</span> to create a new well instead.
-                    </p>
-                    <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                      {matchResults.filter(r => r.kind === 'proximity' && !r.rejected).map(r => (
-                        <div key={r.sourceRow.sourceIndex} className="flex items-center gap-2 py-1 border-b border-sky-100 last:border-0">
-                          <span className="flex-1 text-[11px] text-slate-700">
-                            "{r.sourceRow.wellName || r.sourceRow.wellId || '(no name)'}" → <span className="font-medium">{r.existingWell?.well_name || r.existingWell?.well_id}</span>
-                            <span className="text-slate-400"> · {Math.round(r.distanceMeters || 0)}m</span>
-                          </span>
-                          <button
-                            onClick={() => toggleRejectMatch(r.sourceRow.sourceIndex)}
-                            title="Reject this match — treat the CSV row as a new well instead"
-                            className="px-2 py-0.5 text-[10px] text-red-600 border border-red-200 rounded hover:bg-red-50 hover:border-red-300 font-medium"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                )}
-                {newWellsGseProgress.total > 0 && newWellsGseProgress.done < newWellsGseProgress.total && (
-                  <p className="text-xs text-sky-700 flex items-center gap-1">
-                    <Loader2 size={10} className="animate-spin" />
-                    Fetching elevation for new wells ({newWellsGseProgress.done}/{newWellsGseProgress.total})
-                  </p>
-                )}
-              </div>
             )}
           </div>
         )}
