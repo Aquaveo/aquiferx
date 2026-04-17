@@ -18,23 +18,40 @@ The **time series chart** at the bottom of the screen plots the measurement hist
 
 ## The Data Hierarchy
 
-The application organizes data around a four-level hierarchy that reflects how groundwater monitoring data naturally arranges itself. At the top is the **region** — the geographic container your monitoring program covers. A region might be a state, a river basin, an aquifer system, or a study area of any other shape. Each region has a name, a length unit (feet or meters, which controls how elevations and depths are displayed), a boundary polygon that defines its extent, and a set of aquifers inside it. You can work with a single region at a time or have several loaded simultaneously, switching between them in the sidebar.
+Data is organized in a four-level hierarchy, with computed analyses attaching at the aquifer level:
 
-Nested inside each region is one or more **aquifers**, defined by their own boundary polygons. Aquifers represent the geologic units your wells tap into — a sand-and-gravel aquifer in one part of the region, a fractured-bedrock aquifer in another. Some regions contain many aquifers, others just one; the application handles single-aquifer regions specially so you don't have to set up aquifer boundaries when the region is geologically simple (covered in the next section).
+```
+Region ─── boundary polygon, length unit (ft | m)
+  │
+  ├── Aquifer(s) ─── boundary polygon(s)
+  │     │
+  │     ├── Wells ─── coordinates, GSE, aquifer assignment
+  │     │     │
+  │     │     └── Measurements (per parameter)
+  │     │            wte, nitrate, arsenic, pH, ...
+  │     │
+  │     ├── Raster analyses (per parameter)
+  │     │
+  │     └── Imputation models (per parameter)
+```
 
-Inside each aquifer are the **wells** — the physical monitoring locations where measurements are made. A well has coordinates, an optional ground surface elevation, and an aquifer assignment. In multi-aquifer regions the assignment is derived automatically by checking which aquifer polygon contains the well's coordinates; you rarely need to tag wells manually. Wells are shared across all measurement types: the same well can produce water-level readings, nitrate samples, and arsenic samples, each stored separately but all tied back to the same physical well at the same coordinates.
+A **region** is the top-level container for a study area. Each one has a name, a length unit (feet or meters, which controls how elevations and depths are displayed throughout the UI), and a boundary polygon. Multiple regions can be loaded at once and switched between in the sidebar.
 
-The **measurements** themselves are the bottom level — time-stamped values recorded at a well for a specific parameter. A water table elevation reading on January 15, 2020 is one measurement; a nitrate concentration from a March 2022 sampling event is another. Measurements are stored separately by parameter, so switching from water levels to nitrate in the data type selector simply loads a different set of measurements for the same wells.
+A region contains one or more **aquifers**, each with its own boundary polygon. Single-aquifer regions are handled specially (covered below) so you don't have to set up a separate aquifer layer when the region has just one.
 
-This hierarchy shapes the import workflow (regions before aquifers, aquifers before wells in multi-aquifer regions) and the visualization (the sidebar tree mirrors the hierarchy, and selection at any level filters what appears on the map and chart). Computed analyses — spatial rasters, imputation models — attach at the aquifer level, since they operate on the wells and measurements within a single aquifer.
+Each aquifer holds **wells** — coordinates, an optional ground surface elevation, and an aquifer assignment. In multi-aquifer regions the assignment is derived automatically by point-in-polygon against the aquifer boundaries, so you rarely tag wells by hand. A single well can carry any combination of data types — water level, nitrate, pH, whatever — all tied back to the same physical location.
+
+**Measurements** are time-stamped values at a well for a specific parameter. They're stored by parameter, so switching between water level and nitrate in the data type selector swaps in a different set of values for the same well network.
+
+**Spatial analyses and imputation models** attach at the aquifer level (not the region level), since both operate on the wells and measurements within a single aquifer. They're also parameter-specific — an interpolated nitrate surface is a separate analysis from an interpolated water-table surface over the same aquifer.
 
 ## Single-Aquifer vs. Multi-Aquifer Regions
 
-When you create a region you decide, up front, whether it will contain a single aquifer or multiple aquifers. The distinction changes how the sidebar and import wizards lay themselves out, and it's worth picking the right mode from the beginning because switching later requires recreating the region.
+When you create a region you choose, up front, whether it will have a single aquifer or multiple aquifers. The distinction is worth getting right from the start because switching later requires recreating the region.
 
-A **single-aquifer region** treats the region boundary as the aquifer boundary — one aquifer, filling the region entirely. The sidebar and the import wizards hide the aquifer level in this mode to simplify the workflow: you move directly from region to wells without an aquifer-import step, and every well gets the same aquifer assignment automatically. This mode is appropriate when your study area covers a single geologic unit or when the aquifer distinction doesn't matter to the analysis you're doing.
+A **single-aquifer region** treats the region boundary as the aquifer boundary. The sidebar and import wizards hide the aquifer level entirely in this mode: you go directly from region to wells, and every well gets the same aquifer assignment automatically.
 
-A **multi-aquifer region** has aquifer boundaries as a separate layer. You upload them as a GeoJSON or shapefile containing one polygon feature per aquifer, and the application uses those polygons to assign wells to aquifers via point-in-polygon tests as the wells are imported. Measurements inherit their aquifer assignment from their well. Multi-aquifer mode is appropriate when your region contains distinct geologic units you want to analyze separately — separate interpolated surfaces per aquifer, one aquifer's trends compared to another, and so on.
+A **multi-aquifer region** carries aquifer boundaries as a separate layer. You upload them as a GeoJSON or shapefile containing one polygon feature per aquifer, and the application assigns wells to aquifers via point-in-polygon as the wells are imported. Measurements inherit the assignment from their well. Spatial analyses, trend views, and most other aquifer-level operations run per aquifer, so multi-aquifer mode is what you want whenever you care about keeping hydrostratigraphic units separated in the analysis.
 
 ## Data Types
 
