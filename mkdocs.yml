@@ -23,6 +23,7 @@ nav:
   - Overview: overview.md
   - Preparing Data: data-preparation.md
   - Managing Data: managing-data.md
+  - Water Quality Data: water-quality.md
   - Viewing Data: viewing-data.md
   - Trend Analysis: trend-analysis.md
   - Spatial Analysis:
