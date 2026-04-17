@@ -636,6 +636,17 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
     crs.handleAutoDetectCrs();
   }, [crsSamples, crs.crsPreview, crs.isAutoDetecting, crs.handleAutoDetectCrs]);
 
+  // Identity key for a well. ID wins (authoritative even at shared coords);
+  // otherwise coords collapse spelling variants of the same physical well;
+  // name is the last-resort key for rows without coords. Must be used
+  // consistently across buildSourceWells and the handleImport lookups.
+  const wellIdentityKey = (wellId: string, wellName: string, lat: number | undefined, lng: number | undefined): string => {
+    if (wellId) return `id:${wellId}`;
+    if (lat !== undefined && lng !== undefined) return `@${lat.toFixed(5)}|${lng.toFixed(5)}`;
+    if (wellName) return `name:${wellName}`;
+    return '';
+  };
+
   // Build SourceWellRow[] by deduplicating the CSV on well identity.
   // One match decision per unique well, not per measurement row.
   const buildSourceWells = () => {
@@ -652,8 +663,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
       const latRaw = latCol ? r[latCol] : '';
       const lngRaw = longCol ? r[longCol] : '';
       const { lat, lng } = parseRowCoords(latRaw, lngRaw);
-      // Dedup key: prefer id, then name, then coord pair
-      const key = wellId || wellName || (lat !== undefined && lng !== undefined ? `${lat.toFixed(5)}|${lng.toFixed(5)}` : '');
+      const key = wellIdentityKey(wellId, wellName, lat, lng);
       if (!key || seen.has(key)) return;
       seen.set(key, {
         sourceIndex: i,
@@ -753,17 +763,14 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
       const filesToSave: { path: string; content: string }[] = [];
       const rowIdentityKey = (r: Record<string, string>): string => {
         const id = wellIdCol ? (r[wellIdCol] || '').trim() : '';
-        if (id) return id;
         const name = wellNameCol ? (r[wellNameCol] || '').trim() : '';
-        if (name) return name;
         // Coord-based key uses the reprojected WGS84 values so it lines up
         // with whatever buildSourceWells / matchResults stored.
         const { lat, lng } = parseRowCoords(
           latCol ? r[latCol] : undefined,
           longCol ? r[longCol] : undefined
         );
-        if (lat !== undefined && lng !== undefined) return `${lat.toFixed(5)}|${lng.toFixed(5)}`;
-        return '';
+        return wellIdentityKey(id, name, lat, lng);
       };
 
       // Compose identityKey → final wellId (and track aquifer lookup)
@@ -774,7 +781,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
       if (matchResults && matchResults.length > 0) {
         // For rows with existing matches, use the existing well_id
         for (const r of matchResults) {
-          const srcKey = r.sourceRow.wellId || r.sourceRow.wellName || (r.sourceRow.lat !== undefined && r.sourceRow.lng !== undefined ? `${r.sourceRow.lat.toFixed(5)}|${r.sourceRow.lng.toFixed(5)}` : '');
+          const srcKey = wellIdentityKey(r.sourceRow.wellId || '', r.sourceRow.wellName || '', r.sourceRow.lat, r.sourceRow.lng);
           if (!srcKey) continue;
           if (r.resolvedWellId && !r.rejected) {
             identityToWellId.set(srcKey, r.resolvedWellId);
@@ -797,7 +804,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           });
 
           newRows.forEach((r, i) => {
-            const srcKey = r.sourceRow.wellId || r.sourceRow.wellName || `${r.sourceRow.lat!.toFixed(5)}|${r.sourceRow.lng!.toFixed(5)}`;
+            const srcKey = wellIdentityKey(r.sourceRow.wellId || '', r.sourceRow.wellName || '', r.sourceRow.lat, r.sourceRow.lng);
             const aqx = generateAqxId(r.sourceRow.wellName || null, r.sourceRow.lat!, r.sourceRow.lng!, takenIds);
             takenIds.add(aqx);
             const aquiferId = singleUnit
