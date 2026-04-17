@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload, Calendar, MapPin, Wand2, BookOpen } from 'lucide-react';
+import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload, Calendar, MapPin, Wand2, BookOpen, FlaskConical } from 'lucide-react';
 import { processUploadedFile, UploadedFile, saveFiles, parseDate, detectDateFormat, parseCSV, isInUS, freshFetch, assignWellToAquifer, DATE_FORMATS } from '../../services/importUtils';
 import { fetchUSGSMeasurements, validateUSGSMeasurements, USGSDataQualityReport, USGSMeasurement, USGSDataSpan, computeDataSpan, filterByDateRange, getUSGSApiKey, setUSGSApiKey } from '../../services/usgsApi';
 import { loadCatalog } from '../../services/catalog';
 import CatalogBrowser from '../CatalogBrowser';
+import WqpParameterPicker from '../WqpParameterPicker';
 import {
   matchWells,
   summarizeMatches,
@@ -20,6 +21,16 @@ import CrsPickerPanel from './CrsPickerPanel';
 import ColumnMapperModal from './ColumnMapperModal';
 import ConfirmDialog from './ConfirmDialog';
 import { DataType, ParameterCatalog, RegionMeta } from '../../types';
+import {
+  fetchWqpCounts,
+  fetchWqpStations,
+  fetchWqpResults,
+  dedupWqpResults,
+  buildCharacteristicMap,
+  WqpQueryParams,
+  WqpCounts,
+  WqpDataQualityReport,
+} from '../../services/wqpApi';
 
 interface MeasurementImporterProps {
   regionId: string;
@@ -39,9 +50,10 @@ interface MeasurementImporterProps {
 }
 
 type ImportMode = 'append' | 'replace';
-type DataSource = 'upload' | 'usgs';
+type DataSource = 'upload' | 'usgs' | 'wqp';
 type USGSMode = 'fresh' | 'quick-refresh' | 'full-refresh';
 type AquiferAssignment = 'from-wells' | 'single' | 'csv-field';
+type WqpProvider = 'all' | 'NWIS';
 
 const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   regionId, regionName, lengthUnit, singleUnit, dataTypes, customDataTypes, regionBounds, existingWellCount, onComplete, onClose
@@ -102,6 +114,19 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
   const [isMatching, setIsMatching] = useState(false);
   const [newWellsGseProgress, setNewWellsGseProgress] = useState({ done: 0, total: 0 });
   const [showCatalogBrowser, setShowCatalogBrowser] = useState(false);
+
+  // Phase 4: WQP download state
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const tenYearsAgoIso = new Date(Date.now() - 10 * 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const [wqpSelectedCodes, setWqpSelectedCodes] = useState<string[]>([]);
+  const [wqpStartDate, setWqpStartDate] = useState<string>(tenYearsAgoIso);
+  const [wqpEndDate, setWqpEndDate] = useState<string>(todayIso);
+  const [wqpProvider, setWqpProvider] = useState<WqpProvider>('all');
+  const [wqpCounts, setWqpCounts] = useState<WqpCounts | null>(null);
+  const [wqpIsCounting, setWqpIsCounting] = useState(false);
+  const [wqpIsDownloading, setWqpIsDownloading] = useState(false);
+  const [wqpQualityReport, setWqpQualityReport] = useState<WqpDataQualityReport | null>(null);
+  const [showWqpPicker, setShowWqpPicker] = useState(false);
 
   // Duplicate handling strategy when multiple rows share the same well+date
   type DuplicateStrategy = 'average' | 'maximum' | 'keep-all';
@@ -580,6 +605,160 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
     buildUSGSFile(filtered, 'USGS Measurements (Trimmed)');
     setIsTrimmed(true);
+  };
+
+  // ---- WQP download (Phase 4c) ----
+
+  // Build the WqpQueryParams shared across count and download. WQP uses
+  // [west, south, east, north]; regionBounds is [minLat, minLng, maxLat,
+  // maxLng] so flip accordingly.
+  const wqpQueryParams = useMemo<WqpQueryParams | null>(() => {
+    if (!catalog || wqpSelectedCodes.length === 0) return null;
+    const characteristicNames: string[] = [];
+    for (const code of wqpSelectedCodes) {
+      const cn = catalog.parameters[code]?.wqp?.characteristicName;
+      if (cn) characteristicNames.push(cn);
+    }
+    if (characteristicNames.length === 0) return null;
+    return {
+      bBox: [regionBounds[1], regionBounds[0], regionBounds[3], regionBounds[2]],
+      characteristicNames,
+      startDateLo: wqpStartDate || undefined,
+      startDateHi: wqpEndDate || undefined,
+      providers: wqpProvider === 'NWIS' ? 'NWIS' : undefined,
+    };
+  }, [catalog, wqpSelectedCodes, wqpStartDate, wqpEndDate, wqpProvider, regionBounds]);
+
+  const handleWqpEstimate = async () => {
+    if (!wqpQueryParams) return;
+    setError('');
+    setWqpIsCounting(true);
+    setWqpCounts(null);
+    try {
+      const counts = await fetchWqpCounts(wqpQueryParams);
+      setWqpCounts(counts);
+    } catch (err) {
+      setError(`WQP count failed: ${err}`);
+    }
+    setWqpIsCounting(false);
+  };
+
+  // Pivot deduped WQP results into a wide CSV-shaped table with one
+  // value column per catalog code. Each (siteId, date) becomes one row.
+  // Pre-builds columnMappings so the existing save path can iterate
+  // selectedTypes via typeColumnMapping without the user touching the
+  // mapping editor.
+  const buildWqpFile = (
+    deduped: { siteId: string; date: string; characteristicName: string; value: number }[],
+    stationMap: Map<string, { lat: number; lng: number; name: string }>,
+    selectedCodes: string[]
+  ) => {
+    if (!catalog) return;
+    // characteristicName → catalog code (only for parameters the user picked,
+    // since dedup may have rejected others)
+    const charToCode = new Map<string, string>();
+    for (const code of selectedCodes) {
+      const cn = catalog.parameters[code]?.wqp?.characteristicName;
+      if (cn) charToCode.set(cn.toLowerCase(), code);
+    }
+
+    // Group by (siteId, date)
+    const grouped = new Map<string, Record<string, string>>();
+    for (const r of deduped) {
+      const code = charToCode.get(r.characteristicName.toLowerCase());
+      if (!code) continue;
+      const station = stationMap.get(r.siteId);
+      const key = `${r.siteId}|${r.date}`;
+      let row = grouped.get(key);
+      if (!row) {
+        row = {
+          well_id: r.siteId,
+          well_name: station?.name || '',
+          lat: station ? String(station.lat) : '',
+          long: station ? String(station.lng) : '',
+          date: r.date,
+        };
+        grouped.set(key, row);
+      }
+      row[code] = String(r.value);
+    }
+
+    const rows = Array.from(grouped.values());
+    const columns = ['well_id', 'well_name', 'lat', 'long', 'date', ...selectedCodes];
+
+    setFile({
+      name: 'WQP Download',
+      data: rows,
+      columns,
+      mapping: {
+        well_id: 'well_id',
+        well_name: 'well_name',
+        lat: 'lat',
+        long: 'long',
+        date: 'date',
+      },
+      type: 'csv',
+    });
+
+    // Pre-populate columnMappings — one per catalog code, all included,
+    // each pointing at the matching catalog target. Skips the mapping
+    // editor since these aren't user-supplied columns.
+    const presetMappings: ColumnMapping[] = selectedCodes.map(code => ({
+      column: code,
+      headerUnit: catalog.parameters[code]?.unit || null,
+      include: true,
+      target: { kind: 'catalog', code },
+    }));
+    setColumnMappings(presetMappings);
+
+    // WQP rows always carry lat/lng → enable the well-matching panel
+    setHasWellColumns(true);
+
+    // Date span for the trim widget
+    const dates = rows.map(r => r.date).filter(Boolean).sort();
+    if (dates.length > 0) {
+      const wellCount = new Set(rows.map(r => r.well_id)).size;
+      setDataSpan({
+        minDate: dates[0],
+        maxDate: dates[dates.length - 1],
+        totalRecords: deduped.length,
+        wellCount,
+      });
+      setTrimStartDate(dates[0]);
+      setTrimEndDate(dates[dates.length - 1]);
+    }
+    setIsTrimmed(false);
+  };
+
+  const handleWqpDownload = async () => {
+    if (!wqpQueryParams || !catalog) return;
+    setError('');
+    setFile(null);
+    setWqpIsDownloading(true);
+    setWqpQualityReport(null);
+    setMatchResults(null);
+    setMatchSummary(null);
+    setDataSpan(null);
+    try {
+      const [stations, results] = await Promise.all([
+        fetchWqpStations(wqpQueryParams),
+        fetchWqpResults(wqpQueryParams),
+      ]);
+
+      const stationMap = new Map<string, { lat: number; lng: number; name: string }>();
+      for (const s of stations) {
+        stationMap.set(s.siteId, { lat: s.lat, lng: s.lng, name: s.siteName });
+      }
+
+      const charMap = buildCharacteristicMap(catalog);
+      const { kept, report } = dedupWqpResults(results, charMap);
+      setWqpQualityReport(report);
+
+      buildWqpFile(kept, stationMap, wqpSelectedCodes);
+    } catch (err) {
+      setError(`WQP download failed: ${err}`);
+    }
+    setWqpIsDownloading(false);
   };
 
   // Sample coordinates for the CRS picker — memoized by mapping + data
@@ -1336,7 +1515,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         </div>
 
         {/* Data source */}
-        {regionOverlapsUS && existingWellCount > 0 && (
+        {regionOverlapsUS && (
           <div className="mb-4">
             <label className="block text-sm font-medium text-slate-700 mb-2">Data Source</label>
             <div className="flex gap-2">
@@ -1348,13 +1527,25 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
               >
                 <Upload size={14} /> Upload CSV
               </button>
+              {existingWellCount > 0 && (
+                <button
+                  onClick={() => { setDataSource('usgs'); setFile(null); }}
+                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                    dataSource === 'usgs' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                  }`}
+                  title="Download USGS water levels for wells already in this region"
+                >
+                  <Download size={14} /> USGS Levels
+                </button>
+              )}
               <button
-                onClick={() => { setDataSource('usgs'); setFile(null); }}
+                onClick={() => { setDataSource('wqp'); setFile(null); }}
                 className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                  dataSource === 'usgs' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                  dataSource === 'wqp' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                 }`}
+                title="Download water quality data from the Water Quality Portal (WQP) — discovers wells inside the region bounding box"
               >
-                <Download size={14} /> USGS Download
+                <FlaskConical size={14} /> Water Quality (WQP)
               </button>
             </div>
           </div>
@@ -1362,7 +1553,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
 
 
         {/* Import mode — show for upload and USGS when existing data */}
-        {hasExistingData && (dataSource === 'upload' || dataSource === 'usgs') && (
+        {hasExistingData && (dataSource === 'upload' || dataSource === 'usgs' || dataSource === 'wqp') && (
           <div className="mb-4">
             <label className="block text-sm font-medium text-slate-700 mb-2">Import Mode</label>
             <div className="flex gap-2">
@@ -1557,6 +1748,109 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
           </div>
         )}
 
+        {/* WQP download flow */}
+        {dataSource === 'wqp' && !file && (
+          <div className="mb-4">
+            <p className="text-sm text-slate-500 mb-3">
+              Download water quality data from the Water Quality Portal (USGS + EPA + 400+ agencies). Wells are discovered inside the region's bounding box; new wells are added during import.
+            </p>
+
+            {/* Parameter picker */}
+            <div className="mb-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-slate-700">Parameters</label>
+                <button
+                  onClick={() => setShowWqpPicker(true)}
+                  className="text-xs px-3 py-1 bg-white border border-slate-300 rounded hover:bg-slate-100 text-slate-700 font-medium"
+                >
+                  {wqpSelectedCodes.length > 0 ? 'Edit selection' : 'Pick parameters'}
+                </button>
+              </div>
+              {wqpSelectedCodes.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">No parameters selected.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {wqpSelectedCodes.map(code => {
+                    const param = catalog?.parameters[code];
+                    return (
+                      <span key={code} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full">
+                        {param?.name || code}
+                        <button
+                          onClick={() => setWqpSelectedCodes(prev => prev.filter(c => c !== code))}
+                          className="hover:text-blue-900"
+                          title="Remove"
+                        >
+                          <X size={10} />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Date range */}
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Start Date</label>
+                <input type="date" value={wqpStartDate} onChange={e => { setWqpStartDate(e.target.value); setWqpCounts(null); }}
+                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">End Date</label>
+                <input type="date" value={wqpEndDate} onChange={e => { setWqpEndDate(e.target.value); setWqpCounts(null); }}
+                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm" />
+              </div>
+            </div>
+
+            {/* Provider toggle */}
+            <div className="mb-3">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Sources</label>
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="wqp-provider" checked={wqpProvider === 'all'}
+                    onChange={() => { setWqpProvider('all'); setWqpCounts(null); }} className="text-blue-600" />
+                  <span className="text-sm text-slate-700">All agencies <span className="text-xs text-slate-400">(USGS + EPA + state + tribal)</span></span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="wqp-provider" checked={wqpProvider === 'NWIS'}
+                    onChange={() => { setWqpProvider('NWIS'); setWqpCounts(null); }} className="text-blue-600" />
+                  <span className="text-sm text-slate-700">USGS only <span className="text-xs text-slate-400">(providers=NWIS)</span></span>
+                </label>
+              </div>
+            </div>
+
+            {/* Count preview + download */}
+            <div className="mb-2 flex gap-2">
+              <button
+                onClick={handleWqpEstimate}
+                disabled={wqpIsCounting || wqpIsDownloading || !wqpQueryParams}
+                className="flex-1 px-4 py-2 border border-slate-300 bg-white rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {wqpIsCounting ? <Loader2 size={14} className="animate-spin" /> : <Calendar size={14} />}
+                Estimate
+              </button>
+              <button
+                onClick={handleWqpDownload}
+                disabled={wqpIsDownloading || wqpIsCounting || !wqpQueryParams}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {wqpIsDownloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                {wqpIsDownloading ? 'Downloading…' : 'Download'}
+              </button>
+            </div>
+
+            {wqpCounts && (
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                Estimated: <strong>{wqpCounts.resultCount.toLocaleString()}</strong> result{wqpCounts.resultCount === 1 ? '' : 's'} at <strong>{wqpCounts.siteCount.toLocaleString()}</strong> site{wqpCounts.siteCount === 1 ? '' : 's'}.
+                {wqpCounts.resultCount > 500_000 && (
+                  <p className="mt-1 text-amber-700 font-medium">⚠ Large download — narrow the date range, fewer parameters, or smaller area before pulling.</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Inline structural column mapping — replaces the popup modal */}
         {file && dataSource === 'upload' && (
           <div className="mb-4 p-4 bg-slate-50 border border-slate-200 rounded-lg">
@@ -1601,7 +1895,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         )}
 
         {/* Smart well matching panel — only when lat/lng are mapped */}
-        {file && dataSource === 'upload' && hasSmartColumns && (
+        {file && (dataSource === 'upload' || dataSource === 'wqp') && hasSmartColumns && (
           <div className="mb-4 p-4 bg-sky-50 border border-sky-200 rounded-lg">
             <div className="flex items-center gap-2 mb-2">
               <MapPin size={14} className="text-sky-600" />
@@ -1818,7 +2112,9 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
               <CheckCircle2 size={16} />
               {dataSource === 'usgs'
                 ? `${(file.data as any[]).length} USGS measurements loaded`
-                : `${file.name} (${(file.data as any[]).length} rows)`}
+                : dataSource === 'wqp'
+                  ? `${(file.data as any[]).length} WQP rows ready (${wqpSelectedCodes.length} parameter${wqpSelectedCodes.length === 1 ? '' : 's'})`
+                  : `${file.name} (${(file.data as any[]).length} rows)`}
             </div>
             {unmatchedInfo && (
               <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg mt-2">
@@ -1847,7 +2143,7 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
         )}
 
         {/* Data Span Preview + Date Trimmer */}
-        {dataSpan && dataSource === 'usgs' && file && (
+        {dataSpan && (dataSource === 'usgs' || dataSource === 'wqp') && file && (
           <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <div className="flex items-center gap-2 mb-2">
               <Calendar size={14} className="text-blue-600" />
@@ -1856,28 +2152,54 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
             <p className="text-sm text-slate-700 mb-1">
               {dataSpan.minDate} to {dataSpan.maxDate} — {dataSpan.totalRecords.toLocaleString()} measurements across {dataSpan.wellCount} wells
             </p>
-            {usgsMode === 'quick-refresh' && quickRefreshCutoff && (
+            {dataSource === 'usgs' && usgsMode === 'quick-refresh' && quickRefreshCutoff && (
               <p className="text-xs text-amber-700 mb-2">Cutoff: showing only records after {quickRefreshCutoff}</p>
             )}
-            <div className="flex items-end gap-2 mt-2">
-              <div className="flex-1">
-                <label className="block text-xs text-slate-500 mb-1">Start Date</label>
-                <input type="date" value={trimStartDate} onChange={e => setTrimStartDate(e.target.value)}
-                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm" />
+            {dataSource === 'usgs' && (
+              <div className="flex items-end gap-2 mt-2">
+                <div className="flex-1">
+                  <label className="block text-xs text-slate-500 mb-1">Start Date</label>
+                  <input type="date" value={trimStartDate} onChange={e => setTrimStartDate(e.target.value)}
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs text-slate-500 mb-1">End Date</label>
+                  <input type="date" value={trimEndDate} onChange={e => setTrimEndDate(e.target.value)}
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm" />
+                </div>
+                <button onClick={handleTrim}
+                  className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700">
+                  Trim
+                </button>
               </div>
-              <div className="flex-1">
-                <label className="block text-xs text-slate-500 mb-1">End Date</label>
-                <input type="date" value={trimEndDate} onChange={e => setTrimEndDate(e.target.value)}
-                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm" />
-              </div>
-              <button onClick={handleTrim}
-                className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700">
-                Trim
-              </button>
-            </div>
-            {isTrimmed && (
+            )}
+            {dataSource === 'usgs' && isTrimmed && (
               <p className="text-xs text-green-700 mt-2">Trimmed to {(file.data as any[]).length.toLocaleString()} measurements</p>
             )}
+          </div>
+        )}
+
+        {/* WQP Data Quality Report */}
+        {wqpQualityReport && dataSource === 'wqp' && (
+          <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs">
+            <div className="font-medium text-slate-700 mb-1">WQP cleanup</div>
+            <div className="text-slate-600 space-y-0.5">
+              <div>{wqpQualityReport.totalRaw.toLocaleString()} raw rows → {wqpQualityReport.kept.toLocaleString()} kept</div>
+              {wqpQualityReport.droppedFractionMismatch > 0 && (
+                <div>{wqpQualityReport.droppedFractionMismatch.toLocaleString()} dropped — sample fraction didn't match catalog preference</div>
+              )}
+              {wqpQualityReport.droppedDuplicates > 0 && (
+                <div>{wqpQualityReport.droppedDuplicates.toLocaleString()} duplicates collapsed (same site + date + parameter)</div>
+              )}
+              {wqpQualityReport.details.length > 0 && (
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-slate-500">Details</summary>
+                  <ul className="mt-1 ml-4 list-disc text-slate-500">
+                    {wqpQualityReport.details.map((d, i) => <li key={i}>{d}</li>)}
+                  </ul>
+                </details>
+              )}
+            </div>
           </div>
         )}
 
@@ -1989,6 +2311,14 @@ const MeasurementImporter: React.FC<MeasurementImporterProps> = ({
       )}
 
       {showCatalogBrowser && <CatalogBrowser onClose={() => setShowCatalogBrowser(false)} />}
+
+      {showWqpPicker && (
+        <WqpParameterPicker
+          initialSelected={wqpSelectedCodes}
+          onApply={codes => { setWqpSelectedCodes(codes); setWqpCounts(null); setShowWqpPicker(false); }}
+          onClose={() => setShowWqpPicker(false)}
+        />
+      )}
     </div>
   );
 };
