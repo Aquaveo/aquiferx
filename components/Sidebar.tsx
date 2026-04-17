@@ -288,9 +288,17 @@ const Sidebar: React.FC<SidebarProps> = ({
         return next;
       });
     } else {
+      // Switch to the parent region if needed so the map/data view follows
+      if (selectedRegion?.id !== a.regionId) {
+        const parent = regions.find(r => r.id === a.regionId);
+        if (parent) {
+          if (!visibleRegionIds.has(parent.id)) onToggleRegionVisibility(parent.id);
+          setSelectedRegion(parent);
+          setExpandedRegionIds(new Set([parent.id]));
+        }
+      }
       setSelectedAquifer(a);
       // Accordion: expand this, collapse sibling aquifers
-      const regionAquifers = aquifersByRegion.get(a.regionId) || [];
       const rasters = rastersByAquifer.get(`${a.regionId}:${a.id}`) || [];
       const models = modelsByAquifer.get(`${a.regionId}:${a.id}`) || [];
       const hasChildren = rasters.length > 0 || models.length > 0;
@@ -304,7 +312,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         }
       }
     }
-  }, [selectedAquifer, setSelectedAquifer, aquifersByRegion, rastersByAquifer, modelsByAquifer, activeRasterCode, lastActiveRasterByAquifer, onLoadRaster]);
+  }, [selectedAquifer, setSelectedAquifer, selectedRegion, setSelectedRegion, regions, visibleRegionIds, onToggleRegionVisibility, rastersByAquifer, modelsByAquifer, activeRasterCode, lastActiveRasterByAquifer, onLoadRaster]);
 
   const handleAquiferChevronClick = useCallback((aquiferId: string) => {
     setExpandedAquiferIds(prev => {
