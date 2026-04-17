@@ -175,7 +175,18 @@ const RegionImporter: React.FC<RegionImporterProps> = ({ existingRegionIds, onCo
         if (!relativePath.startsWith(prefix)) continue;
         const fileName = relativePath.slice(prefix.length);
         if (!fileName) continue;
-        const content = await entry.async('text');
+        let content = await entry.async('text');
+        // Migrate legacy region.json: dataTypes → customDataTypes
+        if (fileName === 'region.json') {
+          try {
+            const raw = JSON.parse(content);
+            if (Array.isArray(raw.dataTypes) && !Array.isArray(raw.customDataTypes)) {
+              raw.customDataTypes = raw.dataTypes.filter((dt: { code: string }) => dt.code !== 'wte');
+              delete raw.dataTypes;
+              content = JSON.stringify(raw, null, 2);
+            }
+          } catch {}
+        }
         files.push({ path: `${folderId}/${fileName}`, content });
       }
 
