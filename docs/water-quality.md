@@ -1,12 +1,26 @@
 # Water Quality Data
 
-Aquifer Analyst was originally built around water-level measurements, where the only data type was water table elevation (WTE). The application now also handles a much broader set of water quality (WQ) parameters — pH, nitrate, arsenic, dissolved oxygen, and dozens more. This page describes how WQ data fits into the application, the import paths that bring it into a region, and the conventions that keep things consistent across the regions you work with.
+Aquifer Analyst was originally built around water-level measurements, where the only data type was water table elevation (WTE). The application now also handles a much broader set of water quality (WQ) parameters — pH, nitrate, arsenic, dissolved oxygen, and dozens more. This page describes how WQ data fits into the application, where it can come from, and what to expect along the way.
 
-WQ data behaves quite differently from water-level data. Every WQ measurement is keyed by a parameter — the substance being measured — where each parameter has its own unit, its own regulatory thresholds, and its own data conventions. A reading of `5.2` is meaningless without knowing whether it's mg/L of nitrate or μS/cm of conductivity. WQ data is also typically much sparser than water-level data: many wells have only a handful of WQ samples spread over decades, and the parameters measured at one well may be entirely different from the parameters measured at a neighbor. Finally, public WQ data in the United States is collected by hundreds of agencies — USGS, EPA, state programs, tribal nations — while water-level data is centralized at USGS. The features described on this page accommodate all three of those differences.
+WQ data behaves quite differently from water-level data. Every WQ measurement is keyed by a parameter — the substance being measured — where each parameter has its own unit, its own regulatory thresholds, and its own data conventions. A reading of `5.2` is meaningless without knowing whether it's mg/L of nitrate or μS/cm of conductivity. WQ data is also typically much sparser than water-level data: many wells have only a handful of WQ samples spread over decades, and the parameters measured at one well may be entirely different from the parameters measured at a neighbor. Public WQ data in the United States is also collected by hundreds of agencies — USGS, EPA, state programs, tribal nations — while water-level data is centralized at USGS. The features on this page accommodate all of those differences.
 
-## Standardized Parameters
+## Overview
 
-To keep parameter handling consistent across regions, the application uses a built-in catalog of standardized water quality parameters. Roughly 38 of the most commonly measured groundwater quality parameters are included — the major nutrients, ions, metals, microbiological indicators, and physical measurements. Each catalog parameter has a fixed name, a fixed reporting unit, a category for grouping in the UI, and (where applicable) U.S. EPA Maximum Contaminant Level (MCL) and World Health Organization (WHO) drinking-water reference values.
+A typical workflow for getting water quality data into a region looks like this:
+
+1. **Open the Add Measurements wizard** for the region you want to work with, through the Manage Data button.
+2. **Pick a source.** The wizard offers up to three: an upload from CSV (always available), a USGS download for water levels (US only, water level only), and a download from the Water Quality Portal (US only, water quality).
+3. **The wizard pulls in your data** — either from the file you uploaded or from the chosen source — and matches each row to a well in your region. Wells that don't already exist can be created on the fly.
+4. **You review and confirm** the matches in the well-matching panel. Adjust the proximity threshold or reject individual matches if anything looks wrong.
+5. **You confirm the import.** The data lands in the region and immediately becomes available through the data type dropdown at the top of the application.
+
+The rest of this page walks through each of those steps in detail, plus the concepts that hold them together. The single most important concept to absorb up front is that the application uses a built-in **catalog of standardized water quality parameters** to keep things consistent across regions. The catalog drives the data type dropdown, the column-mapping suggestions in the CSV upload flow, and the parameter picker in the WQP download flow. Once you understand the catalog, the rest of the WQ workflow makes sense.
+
+<!-- screenshot: Add Measurements wizard with the three data source tabs visible -->
+
+## Standardized Parameters and the Catalog
+
+Aquifer Analyst ships with a built-in catalog of roughly 38 standardized water quality parameters — the major nutrients, ions, metals, microbiological indicators, and physical measurements that come up most often in groundwater work. Each catalog parameter has a fixed name (e.g. "Nitrate"), a fixed reporting unit (e.g. mg/L), a category for grouping in the UI (e.g. Nutrient), and (where applicable) U.S. EPA Maximum Contaminant Level (MCL) and World Health Organization (WHO) drinking-water reference values.
 
 The catalog exists so that nitrate is nitrate everywhere. Without it, one region might report nitrate in mg/L and another in mg/L as N, with column headers ranging from "Nitrate" to "NO3" to "Nitrogen-N", and meaningful comparisons across regions would require constant manual reconciliation. By shipping a curated common vocabulary, the application removes that friction: when you import data for nitrate in any region, it lands under the same parameter name with the same unit, and the same MCL is shown in the catalog browser.
 
@@ -18,6 +32,8 @@ You can see the full list of standardized parameters at any time through the **C
 - The **View Catalog** link inside the measurement importer's data column mapping panel.
 
 The browser groups parameters by category (Physical, Nutrient, Major Ion, Minor Metal, Microbiological, etc.), supports search by name or code, and shows the MCL and WHO values alongside each entry. Clicking a row reveals additional detail useful when downloading from the Water Quality Portal — specifically the WQP characteristic name and the preferred sample fraction for that parameter. The browser is informational only; you cannot add, edit, or remove catalog parameters from the application.
+
+<!-- screenshot: Catalog Browser modal with one group expanded -->
 
 ### Custom (non-catalog) parameters
 
@@ -31,7 +47,7 @@ Aquifer Analyst takes a simple approach to deciding which parameters appear in a
 
 This means there's no separate "declare parameters first, then import data" step. Importing data is what brings a parameter into a region, and deleting a parameter's data is what removes it. This keeps the UI honest: every parameter you see in the dropdown has data behind it.
 
-## Importing Water Quality Data
+## The Add Measurements Wizard
 
 Water quality data enters a region through the **Add Measurements** wizard, the same one that handles water-level imports. Open it through **Manage Data** → click the measurements section for the region you want to work with. Across the top of the wizard you'll see up to three data source tabs:
 
@@ -39,13 +55,19 @@ Water quality data enters a region through the **Add Measurements** wizard, the 
 - **USGS Levels** appears when the region overlaps the United States and at least one well already exists. It downloads water-level measurements from USGS and is not relevant to water quality.
 - **Water Quality (WQP)** appears when the region overlaps the United States. It downloads water quality data directly from the federated Water Quality Portal.
 
-The CSV upload and the WQP download both produce water quality data. They feed into the same downstream machinery: the well-matching panel, the data quality cleanup, and the append/replace logic are shared across both sources. The differences are in how rows arrive at the wizard. The next two sections cover each source in detail, with a separate section in between on the well-matching pipeline that both share.
+The CSV upload and the WQP download both produce water quality data. They feed into the same downstream machinery — the well-matching panel, the data quality cleanup, the append/replace logic — so once you've learned the workflow for one, the other only differs in how the rows arrive at the wizard.
+
+<!-- screenshot: Add Measurements wizard with the WQP tab selected, showing the three tabs across the top -->
+
+The wizard's middle and lower sections show different panels depending on which tab you're on and how far along you are. The next section — Smart Well Discovery — describes the shared machinery that activates once data is in the wizard, regardless of which source it came from. After that, separate sections cover the CSV upload tab and the WQP download tab in turn.
 
 ## Smart Well Discovery
 
 Earlier versions of Aquifer Analyst required every well to exist before you could import measurements for it — a strict prerequisite that often made imports painful. Real-world datasets rarely arrive that cleanly. A spreadsheet from a state monitoring program might list 200 wells by name and coordinates, most of which match wells you already have but with slightly different spellings or no shared identifier at all. Forcing manual reconciliation row by row was tedious and error-prone, and it discouraged people from importing data they could otherwise use.
 
 The smart well discovery pipeline solves this by accepting any combination of well identifiers — ID, name, latitude/longitude — on a per-row basis and resolving each row to either an existing well in the region or a new well that the importer creates on the fly. For CSV uploads, you turn the pipeline on by checking **"Measurements file includes well locations"** at the top of the upload tab. For WQP downloads, the pipeline is always on, since every WQP station carries lat/long.
+
+<!-- screenshot: Well matching panel showing the five-cell counter (by ID, by name, by proximity, new, unmatched) -->
 
 ### How rows match wells
 
@@ -57,9 +79,11 @@ For each distinct well in your source data, the pipeline tries four strategies i
 
 **A proximity match** is tried when neither ID nor name resolves the row. The pipeline computes the great-circle distance from the row's coordinates to every existing well in the region and accepts the nearest one within a configurable threshold (100 meters by default). This is how the importer recognizes that "Spring Grdn Well 2" at one set of coordinates and "Spring Garden Well #2" at the same coordinates are the same physical well, even when the names disagree. You can tighten or loosen the threshold from the well matching panel.
 
-**A new well** is created when no existing well lies within the proximity threshold. The new well gets an automatically generated identifier (more on that below), an aquifer assignment derived by checking which aquifer polygon contains its coordinates, and an estimated ground surface elevation pulled from a public elevation service.
+**A new well** is created when no existing well lies within the proximity threshold. The new well gets an automatically generated identifier (described below), an aquifer assignment derived by checking which aquifer polygon contains its coordinates, and an estimated ground surface elevation pulled from a public elevation service.
 
 The well matching panel summarizes the result of all this in a five-cell counter at the top: how many rows matched by ID, how many by name, how many by proximity, how many became new wells, and how many couldn't be resolved at all (rows without any usable identifier or coordinates). Proximity matches are flagged for your review — an expandable list shows each one with the distance, and you can reject individual matches if a spatial coincidence looks wrong. Two genuinely different wells at the same address, for example, would proximity-match to each other; clicking **Reject** treats the source row as a new well instead.
+
+<!-- screenshot: Proximity match review list with a Reject button on one row -->
 
 ### Identifiers for new wells
 
@@ -78,19 +102,25 @@ A common surprise in well matching is that source coordinates may be in a projec
 
 If the WGS 84 default doesn't work — meaning the preview indicates the coordinates land outside the region — an **Auto-detect** button tries the most likely projected systems for the region and picks the one that fits. The application also runs auto-detect automatically once per loaded file when the default fails, so most projected-coordinate CSVs simply work without your touching the picker.
 
+<!-- screenshot: Coordinate System picker showing the auto-detect button and the inside-region preview -->
+
 ### Same well on multiple rows
 
 A subtle but important detail: when the same well appears on multiple rows of your source data (common in WQP downloads, where each row is a separate measurement event), the pipeline deduplicates *before* matching. The deduplication uses an identity key that prefers the well ID, falls back to coordinates (rounded to roughly one-meter precision), and finally falls back to the name. Coordinates win over names so that two rows labeled differently but at identical coordinates collapse into one source well — and therefore one match decision and at most one new-well creation. Without this rule, every spelling variant would become a separate new well at the same location.
 
 ## Uploading from CSV
 
-When you upload a CSV, the application has to translate columns whose names you didn't choose into data types it understands. This happens in three panels that the wizard shows in sequence after you pick the file: a panel for the structural columns, a panel for data columns, and the well matching panel described above.
+When you upload a CSV file, the application has to translate columns whose names you didn't choose into data types it understands. This happens in three panels that the wizard shows in sequence after you pick the file: a panel for the structural columns, a panel for data columns, and the well matching panel described above.
 
-### Structural columns
+<!-- screenshot: Upload CSV tab showing the file picker and "Measurements file includes well locations" checkbox -->
+
+### Mapping structural columns
 
 The **Map Structural Columns** panel handles the columns that describe each measurement's context: well ID, date, latitude, longitude, well name, aquifer ID. The mapper auto-detects common column names — `Latitude` maps to lat, `Sample_Date` maps to date, and so on — but you can override any mapping from a dropdown. A date format selector appears once a date column is mapped, in case auto-detection picks the wrong format for ambiguous dates.
 
-### Data columns
+<!-- screenshot: Map Structural Columns panel with several mappings filled in -->
+
+### Mapping data columns
 
 The **Map Data Columns** panel is where the actual measurement columns get assigned to data types. For each unmapped column in your file, the panel shows a row with a checkbox, the column name as it appears in your file, a target dropdown, and the unit. The target dropdown offers four kinds of targets: any catalog parameter, an existing custom type in your region, a new custom type to be created on the fly, or "skip" if you don't want to import that column.
 
@@ -98,33 +128,43 @@ The application proposes a target for each row using a layered matching strategy
 
 When you select a catalog target, the unit is locked to the catalog's standard unit. If your CSV header carried a different unit hint — for example, the column header says `Nitrate (μg/L)` but the catalog standard for nitrate is `mg/L` — the row displays a warning. The application does not silently convert units; it imports the values as you supplied them and surfaces the discrepancy so you can decide whether the values are correct (and the header was just inconsistent) or whether you need to fix the CSV before re-importing.
 
+<!-- screenshot: Map Data Columns panel showing rows with catalog targets, a unit warning, and the bulk toggle buttons -->
+
 For a CSV with many measurement columns, three bulk toggles at the top of the panel make the choice fast: **Include all** checks every row, **Only catalog matches** checks just the rows the matcher confidently mapped to a catalog parameter, and **None** unchecks everything. You can then flip individual rows from the bulk state.
 
 When a row's target is "new custom type", three input fields appear inline (code, name, unit) so you can fill them in without leaving the panel. The application validates that the code doesn't collide with the catalog and that it follows the lowercase-alphanumeric-plus-underscores convention required for filenames.
 
-## Water Quality Portal Download
+## Downloading from the Water Quality Portal
 
 The Water Quality Portal (WQP) at [waterqualitydata.us](https://www.waterqualitydata.us/) is a federated data warehouse maintained by USGS, EPA, and the National Water Quality Monitoring Council. It pulls together analytical results from over 400 public and private data providers — USGS NWIS, EPA STORET, USDA STEWARDS, state programs, tribal nations — into a single source. Aquifer Analyst's WQP integration brings water quality measurements into a region directly from this source, with no intermediate file download or manual reformatting.
 
 The **Water Quality (WQP)** tab in the Add Measurements wizard appears for any region whose bounding box overlaps the United States. The application treats WQP as U.S.-centric since that's where the data density actually exists, even though the API is technically open worldwide.
 
+<!-- screenshot: WQP tab showing the parameter chips, date range, sources, scope, and Estimate/Download buttons -->
+
+The WQP tab guides you through four decisions before downloading: which parameters, what date range, which agencies, and what spatial scope. Each is described below, in the order you'll encounter them.
+
 ### Picking parameters
 
 The first step is to choose what to download. Click **Pick parameters** to open a multi-select modal. The modal shows the catalog parameters that can be downloaded from WQP, grouped by category (Physical, Nutrient, Major Ion, etc.). You can select individual parameters with the row checkboxes, or use the tri-state group checkboxes to select an entire category (all nutrients, all major ions) with one click. A search box at the top filters by name. **Select all** and **None** buttons make starting from one extreme or the other quick.
+
+<!-- screenshot: WQP Parameter Picker modal with several categories expanded and parameters selected -->
 
 Custom (non-catalog) parameters are intentionally absent from the picker. The Water Quality Portal organizes data by its own list of standardized characteristic names, and only the catalog parameters know how to map back and forth. If you have data for a custom parameter that WQP also tracks, the right path is usually to advocate for adding it to the catalog rather than working around the constraint per-import.
 
 After you click **Apply**, the selected parameters appear as removable chips back on the WQP panel, where you can fine-tune by clicking the small ✕ on any chip to drop it.
 
-### Date range, sources, and scope
+### Date range
 
-Three more inputs shape the query.
+Both start and end dates default to a 10-year window ending today, which is a sensible starting point for "what's been measured here recently". You can extend the start date backward to capture historical data or shorten the window if you only need a recent refresh.
 
-**Date range.** Both start and end dates default to a 10-year window ending today, which is a sensible starting point for "what's been measured here recently". You can extend the start date backward to capture historical data or shorten the window if you only need a recent refresh. The date pickers use your local date format; the application converts to whatever WQP requires internally.
+### Sources
 
-**Sources.** Two radio buttons select which data providers WQP queries. **All agencies** is the default and pulls from every WQP-participating organization — USGS, EPA, state, tribal, the lot. **USGS only** restricts the query to USGS data. The "all agencies" option is usually what you want, since the broader coverage catches data from state and EPA programs that USGS doesn't hold. The USGS-only option is useful if you specifically want to keep your dataset compatible with older USGS-only workflows or if you want to avoid integrating data from a particular non-USGS source.
+Two radio buttons select which data providers WQP queries. **All agencies** is the default and pulls from every WQP-participating organization — USGS, EPA, state, tribal, the lot. **USGS only** restricts the query to USGS data. The "all agencies" option is usually what you want, since the broader coverage catches data from state and EPA programs that USGS doesn't hold. The USGS-only option is useful if you specifically want to keep your dataset compatible with older USGS-only workflows or if you want to avoid integrating data from a particular non-USGS source.
 
-**Scope.** For multi-aquifer regions, a scope picker chooses between **All aquifers in region** (the default) and **Specific aquifer** with a dropdown to pick which one. WQP only accepts a rectangular bounding box as a spatial filter — it has no concept of polygons — so under the hood the query is run against either the union bounding box of every aquifer in your region or the bounding box of the specific aquifer you picked. After the WQP results come back, the application clips the stations against the actual aquifer polygons: stations whose coordinates fall outside the chosen polygon(s) are dropped, and their measurements go with them. This is what keeps the imported dataset focused on the aquifer geometry you care about, not the rectangular envelope around it.
+### Scope
+
+For multi-aquifer regions, a scope picker chooses between **All aquifers in region** (the default) and **Specific aquifer** with a dropdown to pick which one. WQP only accepts a rectangular bounding box as a spatial filter — it has no concept of polygons — so under the hood the query is run against either the union bounding box of every aquifer in your region or the bounding box of the specific aquifer you picked. After the WQP results come back, the application clips the stations against the actual aquifer polygons: stations whose coordinates fall outside the chosen polygon(s) are dropped, and their measurements go with them. This is what keeps the imported dataset focused on the aquifer geometry you care about, not the rectangular envelope around it.
 
 ### Estimating before downloading
 
@@ -132,7 +172,9 @@ Before pulling actual data, click **Estimate** to see how much WQP is about to g
 
 > Estimated: 12,400 results at 340 sites (bounding box). Stations outside the aquifer polygons are dropped after download — actual count will be lower.
 
-The estimate counts what the bounding-box query would return, so two reductions happen later that the estimate can't reflect. First, the polygon clip described above usually drops some stations that were inside the rectangle but outside the actual aquifer geometry. Second, the deduplication step described in the next section drops some result rows whose sample fractions don't match the standard for their parameter. Both reductions happen on your machine after the data arrives, so they can't be previewed — your actual import count will be lower than the estimate, sometimes substantially.
+<!-- screenshot: Estimate result panel showing the count summary and the polygon-clip note -->
+
+The estimate counts what the bounding-box query would return, so two reductions happen later that the estimate can't reflect. First, the polygon clip described above usually drops some stations that were inside the rectangle but outside the actual aquifer geometry. Second, the deduplication step described below drops some result rows whose sample fractions don't match the standard for their parameter. Both reductions happen on your machine after the data arrives, so they can't be previewed — your actual import count will be lower than the estimate, sometimes substantially.
 
 If the estimated result count looks unusually large (over 500,000), an amber warning suggests narrowing the date range, picking fewer parameters, or working with a smaller area. The application doesn't block the download — sometimes a large pull is what you want — but the warning is a nudge to think about what you're committing to. Half a million rows can take a while to fetch and process in the browser.
 
@@ -140,9 +182,11 @@ If the estimated result count looks unusually large (over 500,000), an amber war
 
 Click **Download** to fetch the data. The application asks WQP for the matching stations and the matching results in parallel. For typical regional queries the data arrives in a few seconds; for large queries it may take longer.
 
-Once the data is in, the application does a few things in sequence behind the scenes: it clips stations to the aquifer polygon(s) you chose, drops any results whose station was clipped, deduplicates the surviving results (next section), pivots them into a wide-format table that looks like a multi-column CSV, and hands the result to the well matching panel. From there, the workflow is identical to a CSV upload: you review well matches, optionally adjust the proximity threshold, and confirm the import.
+Once the data is in, the application does a few things in sequence: it clips stations to the aquifer polygon(s) you chose, drops any results whose station was clipped, deduplicates the surviving results (next section), pivots them into a wide-format table that looks like a multi-column CSV, and hands the result to the well matching panel. From there, the workflow is identical to a CSV upload: you review well matches, optionally adjust the proximity threshold, and confirm the import.
 
 A green file-loaded banner shows the row count, and a cleanup panel above the well-matching panel summarizes what was filtered out — how many stations were dropped by the polygon clip, how many measurement rows were dropped because their sample fraction didn't match the catalog standard for the parameter, and how many duplicates were collapsed.
+
+<!-- screenshot: Cleanup panel after a WQP download, showing rows kept vs dropped at each stage -->
 
 ### Filtering duplicates and sample fractions
 
@@ -152,7 +196,7 @@ For each parameter in the catalog, the application records a preferred sample fr
 
 Cleanup runs in two passes. First, rows whose sample fraction doesn't match the catalog standard for that parameter are dropped. Second, of what remains, the first row per (well, date, parameter) combination is kept and the rest are dropped. There's no averaging or quality-weighting — that would require parameter-specific logic and could mask analytically meaningful differences. The cleanup panel shows you exactly how many rows were affected at each stage so you can see whether the result matches your expectations.
 
-If you find that the catalog's fraction preference doesn't match your data — for example, if a region only reports unfiltered nitrate where the standard is filtered — your entire import for that parameter could come back empty. The right fix is usually to revise the catalog preference for the parameter, not to work around it per-import. If you encounter this and think the catalog has it wrong, that's worth raising as a bug.
+If you find that the catalog's fraction preference doesn't match your data — for example, if a region only reports unfiltered nitrate where the standard is filtered — your entire import for that parameter could come back empty. The right fix is usually to revise the catalog preference for the parameter, not to work around it per-import.
 
 ### Why WQP isn't in the Add Wells flow
 
@@ -167,6 +211,8 @@ If you find yourself wanting WQP wells without measurements, the practical worka
 ## Append vs. Replace
 
 Whether you're uploading a CSV or downloading from WQP, when the region already has data for the same parameter, the wizard offers an **Import Mode** toggle. The two modes have very different semantics.
+
+<!-- screenshot: Import Mode toggle with Append selected and the explanation text below it -->
 
 **Append** is the default and is non-destructive. The importer compares each incoming measurement's well-and-date combination against existing records; matches are skipped, and only genuinely new records are added. This is the safe choice for refreshing a dataset with newer records or for adding a parameter that wasn't previously imported. Existing data is never modified or lost.
 
@@ -192,6 +238,10 @@ A few things to keep in mind as you import water quality data:
 
 Once water quality data is imported, you select it through the data type dropdown at the top of the application. The dropdown shows every data type that has data in the current region — water table elevation plus any catalog or custom parameter you've imported. Selecting a parameter switches the entire UI: the well markers on the map are color-coded by the number of measurements available for that parameter, the time series chart shows samples for the selected parameter at the selected wells, and the export tools operate on that parameter's data.
 
+<!-- screenshot: Data type dropdown showing WTE plus several imported water quality parameters -->
+
 WQ visualization works the same way as water-level visualization. The chart's vertical axis adopts the parameter's standard unit (mg/L for nitrate, μS/cm for conductivity, and so on), and the chart title shows the parameter's name. Multi-well selection, smoothing, and date filtering all carry over without modification. Spatial analyses — kriging, IDW, raster animations — are also data-type-aware and operate on whichever parameter is currently selected.
+
+<!-- screenshot: Time series chart showing nitrate measurements at multiple wells with PCHIP smoothing -->
 
 The chart UI does not currently overlay MCL or WHO thresholds as horizontal reference lines, although the catalog browser shows those values for parameters that have them. If this becomes a needed feature, the underlying data is already in place to support it.
