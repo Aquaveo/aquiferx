@@ -7,8 +7,14 @@ Key terms used throughout Aquifer Analyst and this documentation.
 **Aquifer**
 :   A subsurface layer of rock or sediment that holds and transmits groundwater. In Aquifer Analyst, aquifers are spatial subdivisions within a region, each defined by a boundary polygon.
 
+**aqx- ID**
+:   The prefix used for well identifiers that the application generates automatically when importing measurements from a source that has no usable well_id column. Format: `aqx-{name-slug}-{lat}N{lng}W`, or `aqx-{lat}N{lng}W` if no name is available. Distinguishes locally-generated IDs from agency-assigned ones (USGS, WQP) and user-supplied IDs.
+
 **Bilinear Interpolation**
 :   A method for estimating a value at a point using the four surrounding grid cell values. Used when sampling raster surfaces for cross-section profiles and cursor tooltips.
+
+**Catalog (Parameter Catalog)**
+:   The global, curated list of standardized water quality parameters defined in `public/data/catalog_wq.json`. Each catalog entry has a fixed code, name, unit, group, MCL/WHO references, and WQP characteristic mapping. Catalog parameters are implicitly available in every region; a parameter exists in a region exactly when its `data_{code}.csv` file is on disk.
 
 **CRS (Coordinate Reference System)**
 :   A system that defines how spatial coordinates map to locations on Earth. Aquifer Analyst works internally in WGS 84 (EPSG:4326) and automatically reprojects data from other CRS definitions.
@@ -37,6 +43,9 @@ Key terms used throughout Aquifer Analyst and this documentation.
 **Marching Squares**
 :   An algorithm for generating contour lines from gridded data. It examines each 2×2 cell of the grid and determines where contour lines cross cell edges.
 
+**MCL (Maximum Contaminant Level)**
+:   A regulatory drinking-water threshold set by the U.S. EPA for many water quality parameters (e.g. 10 mg/L for nitrate, 0.010 mg/L for arsenic). Stored per-parameter in the catalog and shown in the catalog browser. Values may be plotted as horizontal reference lines on water quality charts in future versions.
+
 **MAvg (Moving Average)**
 :   A smoothing technique that replaces each value with a weighted average of nearby values. In Aquifer Analyst, this uses a Nadaraya-Watson kernel regression with a Gaussian kernel.
 
@@ -57,6 +66,12 @@ Key terms used throughout Aquifer Analyst and this documentation.
 
 **Region**
 :   The top-level geographic unit in Aquifer Analyst. A region is defined by a boundary polygon and contains aquifers, wells, and measurements.
+
+**Sample Fraction**
+:   In water quality data, an attribute distinguishing whether a sample was filtered (dissolved species only) or unfiltered (total, including suspended particles). The catalog specifies a preferred fraction per parameter — typically `Filtered` for dissolved metals and major ions, `null` for parameters where filtration is irrelevant (pH, temperature). WQP downloads drop rows whose sample fraction doesn't match the catalog preference.
+
+**Smart Well Discovery**
+:   The pipeline in the measurement importer that resolves source rows to wells via a four-stage fallback: exact ID match, exact name match, proximity match (default 100m), and finally creating a new well with an `aqx-` prefixed identifier. Always-on for WQP downloads, opt-in for CSV uploads via the "Measurements file includes well locations" toggle.
 
 **Ridge Regression**
 :   A regularized linear regression method that adds a penalty term (\(\lambda \mathbf{I}\)) to the normal equations, preventing overfitting and improving numerical stability. Used in ELM training.
@@ -81,3 +96,12 @@ Key terms used throughout Aquifer Analyst and this documentation.
 
 **WGS 84**
 :   The World Geodetic System 1984 (EPSG:4326), the standard coordinate reference system using latitude and longitude on an ellipsoidal model of the Earth.
+
+**WHO (World Health Organization Guideline)**
+:   An international drinking-water guideline value published by the WHO (e.g. 50 mg/L for nitrate, 0.010 mg/L for arsenic). Stored per-parameter in the catalog alongside the U.S. EPA MCL.
+
+**WQP (Water Quality Portal)**
+:   A federated water quality data warehouse at [waterqualitydata.us](https://www.waterqualitydata.us/) maintained by USGS, EPA, and the National Water Quality Monitoring Council. Aggregates analytical results from over 400 public and private data providers. The measurement importer's WQP tab downloads results and station metadata directly from this source for U.S.-overlapping regions.
+
+**WQX (Water Quality eXchange)**
+:   The data exchange standard underlying WQP. STORET (Storage and Retrieval) is EPA's WQX-conformant database; NWIS (National Water Information System) is USGS's. WQP unifies both.

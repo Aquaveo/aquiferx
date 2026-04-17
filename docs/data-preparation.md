@@ -81,7 +81,7 @@ W002,2020-05-10,14.8,aquifer_1
 
 ### Multi-Type Import
 
-You can also import multiple data types from a single CSV file. In this case, each data type should be in its own column, and you will map each column to a data type during import.
+You can import multiple data types from a single CSV file. Each measurement column should hold values for one data type, and the importer's column mapping editor will offer a target for each — a catalog parameter (nitrate, arsenic, pH, etc.), an existing custom type, a new custom type, or "skip". The mapper auto-suggests a target for each column using exact, fuzzy, and chemical-formula matching against the catalog. Bulk toggles let you include all suggested matches, only catalog matches, or none. See [Water Quality Data — CSV Upload](water-quality.md#csv-upload-and-the-column-mapping-editor) for details on the auto-detection logic.
 
 ### Depth-to-Elevation Conversion
 
@@ -128,16 +128,20 @@ Aquifer Analyst auto-detects dates in the following formats:
 
 If auto-detection picks the wrong format, you can manually select the correct format in the column mapper during import.
 
+### Two-Digit Years
+
+CSV dates with two-digit years (e.g. `01/15/86`, `15/01/24`) are pivoted at 50: years 50 through 99 map to the 1900s, and years 00 through 49 map to the 2000s. So `86` becomes 1986, `24` becomes 2024, and `49` becomes 2049. This handles the typical groundwater data range without requiring a manual format hint, but if your historical data straddles the pivot in unusual ways, double-check the parsed dates after import.
+
 ## Coordinate Reference Systems
 
 All spatial data in Aquifer Analyst is stored in **WGS 84 (EPSG:4326)** — standard latitude and longitude. If your data uses a different CRS:
 
 - **GeoJSON**: Include the `crs` property in the file. The app will detect and reproject automatically.
 - **Shapefiles**: Include the `.prj` file in your ZIP archive. The app reads the projection definition and reprojects using the proj4 library.
-- **CSV (wells)**: Latitude and longitude columns must already be in WGS 84 decimal degrees.
+- **CSV (wells and measurements with coordinates)**: The well importer and the smart-well-discovery pipeline in the measurement importer both expose a CRS picker that defaults to WGS 84. A row preview shows the first record's coordinates re-projected through the selected CRS, with a green check or amber warning indicating whether the result lands inside the region. If the WGS 84 default fails, an **Auto-detect** function tries the most likely projected CRSes for the region; the application also runs auto-detect once automatically per loaded CSV when the default WGS 84 preview lands outside the region.
 
 !!! warning
-    If the app cannot detect the CRS from your file, it assumes WGS 84. Wells or boundaries will appear in the wrong location if the coordinates are actually in a projected system (e.g., UTM, State Plane).
+    Auto-detection compares the first row's reprojected coordinates against the region bounds. If your CSV is empty or its first rows don't have valid coordinates, you may need to pick the CRS manually.
 
 ## Common Pitfalls
 

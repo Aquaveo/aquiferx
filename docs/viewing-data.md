@@ -9,7 +9,7 @@ The sidebar on the left shows a hierarchical tree of your data:
 <!-- screenshot: Sidebar showing expanded region with aquifers and wells -->
 
 - **Regions** — Click to select. An eye icon toggles the region boundary visibility on the map.
-- **Aquifers** — Expand a region to see its aquifers. Click an aquifer to display its wells on the map.
+- **Aquifers** — Expand a region to see its aquifers. Click an aquifer to display its wells on the map. If the aquifer belongs to a region other than the currently selected one, clicking it also switches the selected region (and makes that region visible) so the map and data view follow the click.
 - **Wells** — Listed under each aquifer with a count badge. Click a well to view its time series.
 
 ### Context Menus

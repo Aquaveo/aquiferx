@@ -56,19 +56,19 @@ Region
 
 ## Data Types
 
-Every measurement in Aquifer Analyst belongs to a **data type**. The app ships with one built-in type:
+Every measurement in Aquifer Analyst belongs to a **data type**. Three categories of data types coexist:
 
-| Code | Name | Description |
-|------|------|-------------|
-| `wte` | Water Table Elevation | The primary measurement type — water level relative to a datum |
+- **Water Table Elevation (WTE)** is the built-in default — water level relative to a datum, code `wte`. Every region implicitly has WTE available.
+- **Catalog parameters** are a curated set of standardized water quality parameters (nitrate, arsenic, pH, dissolved oxygen, and ~35 others) defined globally in `public/data/catalog_wq.json`. Their code, name, and unit are fixed across regions so cross-region comparisons stay meaningful.
+- **Custom data types** are non-catalog parameters specific to a region (e.g. trichloroethane, hardness reported as CaCO3). They live in each region's `region.json` under `customDataTypes` and are managed through the data type editor.
 
-You can create additional custom data types (e.g., `salinity`, `ph`, `nitrate`) through the Data Type Editor. Each data type has:
+A catalog or custom data type "exists" in a region exactly when its measurement file (`data_{code}.csv`) is on disk. There is no pre-declaration step — importing data is what brings a type into a region. Each data type has:
 
-- **Code** — A unique identifier (lowercase alphanumeric + underscore, max 20 characters). The code determines the data file name: `data_{code}.csv`.
+- **Code** — A unique identifier (lowercase alphanumeric + underscore, max 20 characters). The code determines the data file name: `data_{code}.csv`. Custom codes cannot collide with catalog codes.
 - **Name** — A human-readable label displayed in the UI.
-- **Unit** — The measurement unit (e.g., `ft`, `m`, `ppm`, `mg/L`).
+- **Unit** — The measurement unit. For catalog parameters this is fixed; for customs you set it yourself.
 
-The toolbar's data type selector lets you switch between types. The map, chart, and sidebar all update to reflect the selected data type.
+The toolbar's data type selector lets you switch between types. The map, chart, and sidebar all update to reflect the selected data type. For a deeper dive on catalog parameters, smart well discovery, and the Water Quality Portal integration, see [Water Quality Data](water-quality.md).
 
 ## File Storage
 
