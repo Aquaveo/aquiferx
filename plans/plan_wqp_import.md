@@ -167,6 +167,8 @@ Each data type gets its own CSV file: `data_{code}.csv`. The `DataTypeEditor` co
 
 ## Proposed Architecture: Hybrid Catalog + Per-Region Types
 
+> **Superseded by Phase 3.5** (see "Phase 3.5: Catalog becomes the global default" further down). The hybrid design landed first, then the catalog was promoted to the implicit default for every region. The diagrams and rationale below are kept for historical context, but the live model is: catalog parameters exist in a region exactly when their `data_{code}.csv` is on disk; only non-catalog customs live in `region.customDataTypes`. No per-region overrides for catalog entries.
+
 **Keep per-region data types** for flexibility, but add a **shared parameter catalog** that provides standardized defaults and USGS mapping.
 
 ### The Catalog: `public/data/catalog_wq.json`
@@ -586,10 +588,12 @@ Handled by the matching strategy in section 5:
 
 #### Data type collisions
 
-If the user downloads nitrate but `nitrate` already exists as a data type in `region.json`:
-- **Just use it.** Don't recreate, don't prompt. The data type already has the right code/name/unit.
-- If the existing name/unit differs from the catalog (e.g. region has "Nitrate-N" instead of "Nitrate"), keep the region's version — region has final say.
-- Only create new data types for parameters not already in the region's `dataTypes[]`.
+After Phase 3.5 the catalog is authoritative globally — `nitrate` doesn't "live in `region.json`", it just exists in a region when `data_nitrate.csv` is on disk. So there's no metadata to collide with:
+
+- The catalog's `code` / `name` / `unit` win for any catalog-backed download. Region overrides are no longer a thing for catalog parameters.
+- WQP downloads only ever target catalog parameters (the parameter picker is the catalog), so every downloaded row resolves cleanly to `data_{code}.csv`.
+- Custom (non-catalog) types stay in `region.customDataTypes` and aren't reachable from WQP downloads — they only matter for CSV uploads.
+- Append/replace semantics (next section) apply at the CSV level. There is no separate "data type collision" decision.
 
 #### Measurement collisions — append vs. replace
 
@@ -682,11 +686,11 @@ The catalog + DataTypeEditor + smart well discovery are **standalone deliverable
 
 **Phase 4: Water quality download via WQP** (US only)
 - WQP API client (fetch results, fetch stations)
-- Parameter picker (reuses catalog browser component from Phase 1)
+- Parameter picker — catalog-backed multi-select. Filtered to entries that carry `wqp.characteristicName`. Reuses the grouped-by-category layout from `CatalogBrowser`; non-catalog parameters aren't reachable from WQP downloads (no characteristic name → nothing to query).
 - Date range filter + count preview + download safeguards
 - Data source toggle (USGS only vs. all agencies)
-- Deduplication strategy
-- Integration into MeasurementImporter as third data source tab
+- Deduplication: per `wqp.sampleFraction` first, then take-first on remaining duplicates
+- Integration into MeasurementImporter as a third data source tab. Because every WQP row carries a `CharacteristicName` and the catalog tells us its code, **the column-mapping editor is bypassed** for this tab — rows route directly to `data_{code}.csv` per catalog code. The well-matching panel still applies (Station endpoint produces lat/lng for every site).
 
 ---
 
