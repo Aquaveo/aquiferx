@@ -96,6 +96,12 @@ const PchipPreviewCanvas: React.FC<PchipPreviewCanvasProps> = ({
     }
     if (xMin >= xMax || yMin >= yMax) return;
 
+    // Extend x-axis to the union of data span and GLDAS span so output-date markers are visible
+    if (gldasRange) {
+      if (gldasRange.min < xMin) xMin = gldasRange.min;
+      if (gldasRange.max > xMax) xMax = gldasRange.max;
+    }
+
     // Add 5% Y padding
     const yPad = (yMax - yMin) * 0.05 || 1;
     yMin -= yPad;
