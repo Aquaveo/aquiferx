@@ -1896,7 +1896,7 @@ const App: React.FC = () => {
           measurements={measurements}
           dataType={activeDataType}
           existingCodes={rasterMeta.filter(a => a.aquiferId === selectedAquifer.id && a.regionId === selectedAquifer.regionId && a.dataType === activeDataType.code).map(a => a.code)}
-          availableModels={modelMeta.filter(m => m.aquiferId === selectedAquifer.id)}
+          availableModels={modelMeta.filter(m => m.aquiferId === selectedAquifer.id && m.regionId === selectedAquifer.regionId)}
           onClose={() => setRasterDialogOpen(false)}
           onComplete={(result) => {
             setRasterResult(result);
