@@ -66,13 +66,16 @@ const AquiferImporter: React.FC<AquiferImporterProps> = ({
       if (importMode === 'replace') {
         // Delete wells and all data files, then write new aquifers
         try { await deleteFile(`${regionId}/wells.csv`); } catch {}
-        // Delete all data_*.csv files by fetching region.json for data types
+        // Delete all data_*.csv files; read from /api/regions which now
+        // scans disk for data files so we no longer depend on region.json.
         try {
-          const metaRes = await freshFetch(`/data/${regionId}/region.json`);
-          if (metaRes.ok) {
-            const meta = await metaRes.json();
-            for (const dt of meta.dataTypes || []) {
-              try { await deleteFile(`${regionId}/data_${dt.code}.csv`); } catch {}
+          const regionsRes = await fetch('/api/regions');
+          if (regionsRes.ok) {
+            const all: any[] = await regionsRes.json();
+            const me = all.find((r: any) => r.id === regionId);
+            const dataFiles: string[] = Array.isArray(me?.dataFiles) ? me.dataFiles : [];
+            for (const f of dataFiles) {
+              try { await deleteFile(`${regionId}/${f}`); } catch {}
             }
           }
         } catch {}

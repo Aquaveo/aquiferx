@@ -1,136 +1,54 @@
 # Getting Started
 
-This guide covers everything you need to install AquiferX and begin working with groundwater data.
+Aquifer Analyst is a browser-based application that runs from a small local development server on your own machine. There's no cloud service to sign up for and no database to provision — you clone the repository, install its dependencies, start the server, and open a URL in your browser. This page walks through the prerequisites, the one-time installation, and the first few things to do once the application is running.
 
-## System Requirements
+## Prerequisites
 
-- **Node.js** 18 or later
-- **Modern web browser**: Chrome, Firefox, Edge, or Safari (latest two major versions)
-- **Operating system**: Windows, macOS, or Linux
-- **Git** — required to clone the repository
+The application runs on any modern desktop operating system (Windows, macOS, or Linux) and works in any recent version of Chrome, Firefox, Edge, or Safari. Under the hood it needs two pieces of supporting software:
 
-### Installing Git
+- **Node.js 18 or later**, which provides the JavaScript runtime and bundled package manager (`npm`) that drive the local server.
+- **Git**, used to clone the repository and to pull updates.
 
-If you don't already have Git installed, follow the instructions for your operating system:
-
-=== "Windows"
-
-1. Download the installer from [git-scm.com](https://git-scm.com/download/win).
-2. Run the installer and accept the default settings.
-3. After installation, open **Git Bash** or **Command Prompt** and verify:
-
-        git --version
-
-=== "macOS"
-
-Open **Terminal** and run:
-
-    git --version
-
-If Git is not installed, macOS will prompt you to install the Xcode Command Line Tools. Click **Install** and follow the prompts. Alternatively, install via [Homebrew](https://brew.sh/):
-
-    brew install git
-
-After installing, verify Git is available by running:
-
-    git --version
-
-### Installing Node.js
-
-AquiferX requires Node.js 18 or later. If you don't have it installed, follow the instructions for your operating system:
-
-=== "Windows"
-
-1. Download the **LTS** installer from [nodejs.org](https://nodejs.org/).
-2. Run the installer and accept the default settings (this also installs **npm**).
-3. Open **Command Prompt** or **PowerShell** and verify:
-
-        node --version
-        npm --version
-
-=== "macOS"
-
-Option A — Download the **LTS** installer from [nodejs.org](https://nodejs.org/) and follow the prompts.
-
-Option B — Install via [Homebrew](https://brew.sh/):
-
-    brew install node
-
-After installing, verify in **Terminal**:
+Most Linux distributions ship with both available through the package manager. On macOS, both can be installed via [Homebrew](https://brew.sh/) — `brew install node git` — or downloaded directly from [nodejs.org](https://nodejs.org/) and [git-scm.com](https://git-scm.com/download/mac). On Windows, grab the LTS installer from [nodejs.org](https://nodejs.org/) (it bundles npm) and the Git installer from [git-scm.com](https://git-scm.com/download/win); defaults are fine on both. You can verify both are installed and visible on your path by running:
 
     node --version
-    npm --version
+    git --version
 
 ## Installation
 
-1. **Clone the repository**:
+Clone the repository, install the dependencies, and start the development server:
 
-        git clone https://github.com/njones61/aquiferx.git
-        cd aquiferx
+    git clone https://github.com/njones61/aquiferx.git
+    cd aquiferx
+    npm install
+    npm run dev
 
-2. **Install dependencies**:
+The first two commands are one-time. The `npm install` step downloads the JavaScript dependencies into a local `node_modules` folder and takes a few minutes on a fresh checkout. The final command starts the development server and prints a URL — by default <http://localhost:3000> — that you can open in your browser.
 
-        npm install
+For subsequent sessions, you only need the last command:
 
-3. **Start the development server**:
+    cd aquiferx
+    npm run dev
 
-        npm run dev
-
-   The app starts on [http://localhost:3000](http://localhost:3000).
-
-The steps above are for the fist installation only. After the initial installation, you simply need to navigate to the `aquiferx` folder and run `npm run dev` to start the app:
-
-        cd aquiferx
-        npm run dev
+Leave the terminal running while you use the app; the server needs to stay up for the page to load. `Ctrl+C` in the terminal stops it.
 
 ## First Launch
 
-When you open the app for the first time, you will see:
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Initial app view with a sample region loaded</div>
 
-- A **sidebar** on the left listing available regions (initially empty or pre-loaded with sample data).
-- An **interactive map** in the center.
-- A **toolbar** along the top with buttons for managing data, running analyses, and switching data types.
+The browser opens to the four-pane interface described in the [Overview](overview.md) — a toolbar at the top, a sidebar tree on the left, a map in the center, and a time series chart at the bottom. If the repository includes sample data, one or more regions will already be listed in the sidebar and you can skip to exploring them. If the sidebar is empty, you'll start by importing a region, either by creating one from scratch through the **Manage Data** button or by unzipping a packaged region you already have. The [Managing Data](managing-data.md) page walks through both paths.
 
-<!-- screenshot: Initial app view with empty state or sample data loaded -->
+## Exploring a Region
 
-If sample data is included with the repository, you will see one or more regions listed in the sidebar. Click a region name to expand it and view its aquifers and wells.
+Once a region is loaded, the typical first-time sequence is straightforward. Expand the region in the sidebar to see its aquifers, and click an aquifer to zoom the map to that aquifer and display its wells as colored markers. Marker color reflects the number of observations each well has for the currently selected data type, so the densest data shows up as the darkest cluster.
 
-## Quick Start Walkthrough
+Clicking any well plots its measurement history in the time series chart at the bottom of the screen. Hold **Shift** while clicking additional wells to overlay them on the same chart, each in a different color, or hold Shift and drag a rectangle across the map to select every well inside the box. The data type selector at the top of the toolbar switches between water level, any water quality parameters that have been imported, and any custom parameters defined for the region.
 
-### Step 1: Load a Region
-
-Click the **Manage Data** button in the toolbar to open the Import Data Hub. From here you can:
-
-- **Create a new region** by clicking "New Region" and following the wizard.
-- **Import a packaged region** from a ZIP file containing pre-formatted data.
-
-See [Managing Data](managing-data.md) for detailed import instructions.
-
-### Step 2: View Wells on the Map
-
-After loading a region, expand the region in the sidebar and click on an aquifer to see its wells on the map. Wells appear as colored circles — the color reflects the number of available measurements.
-
-### Step 3: Explore a Time Series
-
-Click any well on the map or in the sidebar to display its measurement time series in the chart panel below the map. The chart shows:
-
-- **Measurement dots** — the actual recorded data points.
-- **PCHIP interpolation curve** — a smooth line drawn through the measurements.
-
-### Step 4: Try Multi-Well Selection
-
-Hold <kbd>Shift</kbd> and click additional wells to add them to your selection. Each well gets its own color-coded line in the chart. You can also hold <kbd>Shift</kbd> and drag a box on the map to select all wells within a region.
-
-### Step 5: Run an Analysis
-
-Once you have data loaded, explore the analysis tools:
-
-- **Trend Analysis** — Click the trend button to see rising/declining water levels across all wells.
-- **Spatial Analysis** — Interpolate measurements across the aquifer to create animated raster surfaces.
-- **Impute Data** — Use machine learning to fill gaps in sparse measurement records.
+The toolbar's three analysis buttons launch more involved workflows: **Trend Analysis** overlays a region-wide linear regression view that color-codes wells by their rate of change, **Spatial Analysis** runs interpolation (kriging or IDW) across the aquifer to produce animated raster surfaces, and **Impute Data** trains a machine-learning model per well that fills gaps in sparse records. Each of these has its own documentation page with the details.
 
 ## What's Next?
 
-- [Overview](overview.md) — Understand the full interface and data architecture.
-- [Preparing Data](data-preparation.md) — Learn how to format your data files.
-- [Managing Data](managing-data.md) — Step-by-step import and export instructions.
+- The [Overview](overview.md) covers the interface and data model in more depth.
+- The [Preparing Data](data-preparation.md) page describes the file formats the import wizards expect.
+- The [Managing Data](managing-data.md) page walks through the import and export workflows.
+- The [Water Quality Data](water-quality.md) page covers the parameter catalog, smart well discovery, and the Water Quality Portal download.

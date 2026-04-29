@@ -3,21 +3,5 @@
   "name": "Dominican Republic",
   "lengthUnit": "m",
   "singleUnit": false,
-  "dataTypes": [
-    {
-      "code": "wte",
-      "name": "Water Table Elevation",
-      "unit": "m"
-    },
-    {
-      "code": "tce",
-      "name": "Trichloroethane",
-      "unit": "PPM"
-    },
-    {
-      "code": "salt",
-      "name": "Salinity",
-      "unit": "ppm"
-    }
-  ]
+  "customDataTypes": []
 }

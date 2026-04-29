@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This page addresses common issues you may encounter when using AquiferX.
+This page addresses common issues you may encounter when using Aquifer Analyst.
 
 ## CRS and Coordinate Issues
 
@@ -37,13 +37,13 @@ This page addresses common issues you may encounter when using AquiferX.
 
 ### "No matching wells" warning during measurement import
 
-**Cause**: The `well_id` values in your measurement file do not match any `well_id` values in the wells file.
+**Cause**: The `well_id` values in your measurement file do not match any `well_id` values in the wells file, and smart well discovery is either off or has no coordinates to fall back on.
 
 **Solution**:
 
-- Check for leading/trailing spaces in your well IDs.
-- Ensure the same ID format is used in both files (e.g., `W001` vs `W-001`).
-- Import wells before measurements — measurements are matched against the existing well list.
+- If your file has lat/long or well-name columns, enable **"Measurements file includes well locations"** at the top of the upload tab. The importer will match rows by ID, then by name, then by proximity (default 100m), and create new wells for unmatched coordinates. See [Water Quality Data — Smart Well Discovery](water-quality.md#smart-well-discovery).
+- If your file has no spatial columns, check for leading/trailing spaces in well IDs and confirm the same ID format is used in both files (e.g. `W001` vs `W-001`).
+- For data with mixed naming (slightly different spellings of the same well across rows), proximity matching collapses spelling variants when the rows share coordinates — make sure lat/long are mapped.
 
 ### Measurement values are missing or NaN
 
@@ -173,6 +173,48 @@ This page addresses common issues you may encounter when using AquiferX.
 **Solution**:
 
 - This is expected behavior. The API queries specifically for groundwater sites within your region's bounding box.
+
+## WQP (Water Quality Portal) Issues
+
+### WQP Estimate or Download fails with HTTP 403
+
+**Cause**: The application routes WQP traffic through a small server-side helper to work around browser cross-origin restrictions on the Water Quality Portal's response headers. If the dev server hasn't been restarted since the helper was added, that route may not be active yet.
+
+**Solution**:
+
+- Stop the dev server and start it again (`npm run dev`). Server-side routes only register at startup.
+- If the problem persists, check whether you can reach `https://www.waterqualitydata.us/` directly in the browser to rule out a network-level block.
+
+### Estimate count looks much higher than the imported count
+
+**Cause**: Expected behavior. The Estimate count reflects WQP's bounding-box query; the actual import is reduced by two client-side steps that WQP can't preview:
+
+- **Polygon clip** — stations outside the chosen aquifer polygon(s) are dropped.
+- **Sample fraction filter and dedup** — rows whose `ResultSampleFractionText` doesn't match the catalog's preferred fraction are dropped, and duplicate (site, date, parameter) rows are collapsed.
+
+**Solution**:
+
+- The data quality panel after download shows exactly how many rows were dropped at each stage.
+- If the polygon clip is dropping more stations than expected, double-check your aquifer boundaries — wells just outside the polygon edge will be excluded.
+
+### WQP returns very few or no results for a known-active aquifer
+
+**Cause**: Either the parameter selection doesn't match what's actually been measured in the area, the date range is too narrow, or the providers filter is set to USGS-only when the data lives in EPA STORET or a state database.
+
+**Solution**:
+
+- Open **Pick parameters** and verify your selections include the parameters you'd expect (e.g. nitrate, arsenic).
+- Switch the Sources radio to **All agencies** to include EPA STORET and state programs.
+- Widen the date range. WQP data density varies enormously by location and parameter; many wells have only a handful of samples spread over decades.
+
+### WQP returns no measurements for a parameter you know is present
+
+**Cause**: The standard sample fraction for that parameter (filtered for most dissolved species) may not match what your data sources reported. The cleanup step drops rows whose sample fraction doesn't match the standard for the parameter; if every row in your data has a non-matching fraction, every row is dropped.
+
+**Solution**:
+
+- Look at the cleanup panel after the download — if "dropped — sample fraction didn't match" is high relative to the total, the standard may be too strict for the data your region's agencies report.
+- The right fix is usually to update the catalog's standard for the parameter rather than working around it per-import. Raise this as a bug describing the parameter and what fraction your sources actually use.
 
 ## General Tips
 

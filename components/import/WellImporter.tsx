@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, CheckCircle2, Loader2, AlertTriangle, Download, Upload, RefreshCw } from 'lucide-react';
 import { processUploadedFile, UploadedFile, saveFiles, deleteFile, isInUS, assignWellToAquifer, parseCSV, freshFetch } from '../../services/importUtils';
 import { fetchUSGSWells, getUSGSApiKey, setUSGSApiKey } from '../../services/usgsApi';
+import { SampleCoord } from '../../services/reprojection';
+import { useCrsPicker } from '../../hooks/useCrsPicker';
+import CrsPickerPanel from './CrsPickerPanel';
 import ColumnMapperModal from './ColumnMapperModal';
 import ConfirmDialog from './ConfirmDialog';
 
@@ -71,6 +74,26 @@ const WellImporter: React.FC<WellImporterProps> = ({
     (regionBounds[0] + regionBounds[2]) / 2,
     (regionBounds[1] + regionBounds[3]) / 2
   );
+
+  // Sample coordinates for CRS picker preview / auto-detect. Pull up to 5
+  // parseable (x, y) pairs from the mapped lat/long columns.
+  const crsSamples = useMemo<SampleCoord[]>(() => {
+    if (!file) return [];
+    const latCol = file.mapping['lat'];
+    const longCol = file.mapping['long'];
+    if (!latCol || !longCol) return [];
+    const out: SampleCoord[] = [];
+    for (const r of file.data as Record<string, string>[]) {
+      const x = parseFloat(r[longCol]);
+      const y = parseFloat(r[latCol]);
+      if (!isNaN(x) && !isNaN(y)) out.push({ x, y });
+      if (out.length >= 5) break;
+    }
+    return out;
+  }, [file?.mapping, file?.data]);
+
+  const crs = useCrsPicker({ regionBounds, samples: crsSamples });
+  const { parseRowCoords } = crs;
 
   // Load existing USGS well IDs for refresh feature
   useEffect(() => {
@@ -348,9 +371,16 @@ const WellImporter: React.FC<WellImporterProps> = ({
     const wellIdCol = file.mapping['well_id'];
     const latCol = file.mapping['lat'];
     const longCol = file.mapping['long'];
+    // Reproject via the selected CRS so elevation queries land at real
+    // lat/lng, not raw easting/northing values.
     const wells = (file.data as Record<string, string>[])
-      .filter(w => w[wellIdCol] && w[latCol] && w[longCol])
-      .map(w => ({ id: w[wellIdCol], lat: parseFloat(w[latCol]), lng: parseFloat(w[longCol]) }));
+      .map(w => {
+        const { lat, lng } = parseRowCoords(w[latCol], w[longCol]);
+        return { id: w[wellIdCol], lat, lng };
+      })
+      .filter((w): w is { id: string; lat: number; lng: number } =>
+        !!w.id && w.lat !== undefined && w.lng !== undefined
+      );
 
     setGseProgress({ current: 0, total: wells.length });
     const allInUS = wells.every(w => isInUS(w.lat, w.lng));
@@ -425,9 +455,8 @@ const WellImporter: React.FC<WellImporterProps> = ({
       case 'by-location': {
         const latCol = file?.mapping['lat'] || '';
         const longCol = file?.mapping['long'] || '';
-        const lat = parseFloat(row[latCol]);
-        const lng = parseFloat(row[longCol]);
-        if (!isNaN(lat) && !isNaN(lng) && aquifersGeojson) {
+        const { lat, lng } = parseRowCoords(row[latCol], row[longCol]);
+        if (lat !== undefined && lng !== undefined && aquifersGeojson) {
           return assignWellToAquifer(lat, lng, aquifersGeojson) || '';
         }
         return '';
@@ -448,14 +477,20 @@ const WellImporter: React.FC<WellImporterProps> = ({
       const longCol = file.mapping['long'];
       const gseCol = file.mapping['gse'];
 
-      const processedWells = rows.map(w => ({
-        well_id: w[wellIdCol] || '',
-        well_name: wellNameCol ? w[wellNameCol] || '' : '',
-        lat: w[latCol] || '',
-        long: w[longCol] || '',
-        gse: gseCol ? w[gseCol] || '' : (gseValues.get(w[wellIdCol])?.toString() ?? ''),
-        aquifer_id: resolveAquiferId(w)
-      })).filter(w => w.well_id && w.lat && w.long);
+      // Reproject lat/long through the selected CRS so the CSV always
+      // stores WGS84 values, even when the user's source data was in a
+      // projected coordinate system (e.g. JAD2001 Jamaica Metric Grid).
+      const processedWells = rows.map(w => {
+        const { lat, lng } = parseRowCoords(w[latCol], w[longCol]);
+        return {
+          well_id: w[wellIdCol] || '',
+          well_name: wellNameCol ? w[wellNameCol] || '' : '',
+          lat: lat !== undefined ? String(lat) : '',
+          long: lng !== undefined ? String(lng) : '',
+          gse: gseCol ? w[gseCol] || '' : (gseValues.get(w[wellIdCol])?.toString() ?? ''),
+          aquifer_id: resolveAquiferId(w),
+        };
+      }).filter(w => w.well_id && w.lat && w.long);
 
       const isAquiferScoped = dataSource === 'usgs' && usgsScope === 'aquifer' && usgsScopeAquiferId;
       const formatRow = (w: Record<string, string>) =>
@@ -513,11 +548,13 @@ const WellImporter: React.FC<WellImporterProps> = ({
         // Region-wide replace: delete measurements then write
         if (importMode === 'replace' && existingWellCount > 0) {
           try {
-            const metaRes = await freshFetch(`/data/${regionId}/region.json`);
-            if (metaRes.ok) {
-              const meta = await metaRes.json();
-              for (const dt of meta.dataTypes || []) {
-                try { await deleteFile(`${regionId}/data_${dt.code}.csv`); } catch {}
+            const regionsRes = await fetch('/api/regions');
+            if (regionsRes.ok) {
+              const all: any[] = await regionsRes.json();
+              const me = all.find((r: any) => r.id === regionId);
+              const dataFiles: string[] = Array.isArray(me?.dataFiles) ? me.dataFiles : [];
+              for (const f of dataFiles) {
+                try { await deleteFile(`${regionId}/${f}`); } catch {}
               }
             }
           } catch {}
@@ -791,6 +828,13 @@ const WellImporter: React.FC<WellImporterProps> = ({
                 Edit Column Mapping
               </button>
             )}
+          </div>
+        )}
+
+        {/* Coordinate reference system — upload flow with mapped lat/long */}
+        {file && dataSource === 'upload' && file.mapping['lat'] && file.mapping['long'] && (
+          <div className="mb-4 p-4 bg-sky-50 border border-sky-200 rounded-lg">
+            <CrsPickerPanel crs={crs} />
           </div>
         )}
 

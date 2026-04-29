@@ -1,163 +1,108 @@
 # Viewing Data
 
-Once data is loaded into AquiferX, you can explore it through the sidebar tree, interactive map, and time series chart.
+Most of the time you spend in Aquifer Analyst will be in the three visualization panes — the sidebar tree, the interactive map, and the time series chart — reading what's there and navigating between views rather than launching wizards. This page covers how those panes work, how selections propagate between them, and the controls that shape what each one displays.
 
-## Sidebar Navigation
+## The Sidebar Tree
 
-The sidebar on the left shows a hierarchical tree of your data:
+The sidebar is the application's primary index. Regions sit at the top level, with aquifers nested inside each region and wells nested inside each aquifer. Any computed analyses — spatial rasters, imputation models — are listed under the aquifers they were computed for. The tree expands and collapses as you navigate, keeping the currently relevant branch open and folding siblings away so the panel stays readable even with thousands of wells across many regions.
 
-<!-- screenshot: Sidebar showing expanded region with aquifers and wells -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Sidebar showing an expanded region with aquifers, wells, rasters, and models</div>
 
-- **Regions** — Click to select. An eye icon toggles the region boundary visibility on the map.
-- **Aquifers** — Expand a region to see its aquifers. Click an aquifer to display its wells on the map.
-- **Wells** — Listed under each aquifer with a count badge. Click a well to view its time series.
+Selection drives what the rest of the application displays. Clicking a region selects it and focuses the map on its boundary; clicking an aquifer selects it and brings up its wells; clicking a well adds it to the chart. If you click an aquifer whose parent region isn't currently selected, the application switches the selection to that region automatically (and makes the region visible if it was hidden), so the map and data follow the click without extra steps. Clicking an already-selected region or aquifer deselects it.
 
-### Context Menus
+Each region entry has an eye icon that toggles the region's visibility on the map independently of selection. This lets you keep several regions loaded and only show the one you're currently working with. Rasters and models in the sub-tree work similarly — clicking loads them as overlays, clicking again unloads. When a raster or model is loaded, the data type selector in the toolbar automatically switches to match, so the map markers, chart, and overlay are always showing the same parameter.
 
-Right-click on a region or aquifer to access additional actions:
+Right-clicking any item opens a context menu. The available actions depend on what you right-clicked — regions support edit, show/hide, download, and delete; aquifers support rename and delete; rasters and models support rename, get info, and delete. The download action on a region packages the entire region folder as a ZIP, suitable for backup or sharing.
 
-- **Edit** — Modify region name or length unit.
-- **Rename** — Rename a region or aquifer.
-- **Download** — Export the region as a ZIP file.
-- **Delete** — Remove the item (with confirmation).
+## The Interactive Map
 
-### Raster Analyses
+The map fills the center of the screen and renders well markers and polygon boundaries on top of a basemap of your choice. It uses Leaflet underneath, which means panning and zooming work the way they do on every other web map: drag to pan, scroll to zoom, double-click to zoom in, use the +/− controls in the top-right corner for discrete zoom steps.
 
-Below the well list, the sidebar shows any computed raster analyses for the selected aquifer. Click a raster to load it as an overlay on the map. You can also rename, delete, or view info about each raster.
-
-### Imputation Models
-
-Similarly, any imputation models for the selected aquifer are listed. Click a model to load its results into the time series chart.
-
-## Interactive Map
-
-The center of the app displays an interactive Leaflet map.
-
-<!-- screenshot: Map showing wells on satellite imagery with region boundary -->
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map showing a region with wells on satellite imagery</div>
 
 ### Basemaps
 
-Click the basemap selector in the map controls to choose from eight options:
+The basemap selector in the map's controls offers eight options: OpenStreetMap for streets and labels, Esri Topographic for terrain and contour features, Esri Imagery for satellite and aerial photos, Esri Streets for a simplified road map, Esri Light Gray and Dark Gray for minimal canvases (useful when you want the data to read without basemap competition), Esri Terrain for hillshade with land cover, and Esri National Geographic for a more editorial style. Each option shows a thumbnail preview in the selector so you can pick without flipping between them.
 
-| Basemap | Description |
-|---------|-------------|
-| OpenStreetMap | Standard open-source street map |
-| Esri Topographic | Detailed topographic features |
-| Esri Imagery | Satellite and aerial imagery |
-| Esri Streets | Simplified street map |
-| Esri Light Gray | Minimal gray canvas |
-| Esri Dark Gray | Dark-themed canvas |
-| Esri Terrain | Hillshade and land cover |
+### Well markers
 
-Each basemap shows a thumbnail preview in the selector.
+Wells appear as colored circular markers. Marker color reflects how many observations the well has for the currently selected data type — lighter colors mean few observations, darker colors mean many, and wells with no observations for the current parameter show in muted red. Switching the data type in the toolbar re-colors the markers immediately, so you can see at a glance which parts of the aquifer have which parameters measured.
 
-### Well Markers
+A minimum-observations filter in the toolbar hides wells with fewer than a given number of readings for the current parameter. This is useful both for cleaning up maps of sparse water-quality parameters (where a threshold of 2 or 3 drops the single-sample wells that clutter the view) and for focusing analyses like trend regression that need multiple points to be meaningful. The default threshold is 0, which shows every well.
 
-Wells appear as circles on the map. Their color reflects the number of available measurements for the currently selected data type — lighter colors indicate fewer measurements, darker colors indicate more. A minimum observation threshold filter (in the toolbar) lets you hide wells with too few measurements.
+### Date filter
 
-### Date Filter
+A **Filter dates** toggle in the map options panel narrows the display to wells whose measurement history overlaps a specified window. When enabled, two year inputs appear for the window's bounds. A well passes the filter if its measurement span — earliest to latest reading for the current data type — overlaps the window, not necessarily if it has a reading *inside* the window. A well with measurements in 2000 and 2008 passes a 2002–2005 filter, because the 2000–2008 span covers the filter range. This semantic avoids a common frustration where a useful well drops off the map because its samples happen to fall on either side of the chosen window.
 
-The **Filter dates** toggle in the map options panel lets you show only wells whose measurement date range overlaps a specified time window. When enabled, two year inputs appear for the minimum and maximum year. The min year defaults to the earliest measurement year in the data, and the max year defaults to the current year.
-
-A well passes the filter if its measurement span (earliest to latest) overlaps the filter range — the well does not need to have a measurement that falls directly within the range. For example, a well with measurements in 2000 and 2008 would pass a 2002–2005 filter because its span covers that period.
-
-The filter updates only after you enter a full 4-digit year, so typing intermediate digits does not cause wells to flicker on and off. When the date filter is active and you select a well, the time series chart displays a gray shaded band over the filter range for visual reference.
+The filter updates only after you enter a full four-digit year, so typing intermediate digits doesn't cause wells to flicker on and off. When the date filter is active and you have a well selected, the time series chart overlays a gray band covering the filter range so you can see how the filter relates to the individual well's data.
 
 ### Labels
 
-Toggle aquifer labels and well labels using the controls in the toolbar. Labels can show the well ID or name, and you can adjust the font size (9–16px).
+Two label toggles in the toolbar control aquifer and well labels. Aquifer labels display each aquifer's name at its label point (a pole-of-inaccessibility calculation that picks a visually central location inside the polygon). Well labels display each well's ID or name next to its marker, with a font size setting (9–16 px) if the defaults are too large or too small for the zoom level you work at.
 
-## Well Search
+### Well search
 
-When an aquifer is selected, a search bar appears in the top-left corner of the map. Type a well name or ID to filter matching wells — up to 8 results appear in a dropdown. Use the <kbd>Arrow</kbd> keys to navigate the list and <kbd>Enter</kbd> to select, or click a result directly. Press <kbd>Escape</kbd> to dismiss the search.
-
-Selecting a well from the search results flies the map to that well's location and briefly highlights it with a shrinking red ring animation.
+When an aquifer is selected, a search bar appears in the top-left corner of the map. Type a partial well name or ID to filter matching wells; up to eight results appear in a dropdown. Arrow keys navigate the list, Enter selects, Escape dismisses. Selecting a well flies the map to that well's location and briefly highlights the marker with a shrinking red ring — useful both as a find-and-go shortcut and as a way to confirm visually that the right well got selected from an ambiguous name.
 
 ## Well Selection
 
-AquiferX supports several ways to select wells for viewing in the time series chart.
+Clicking a well on the map or in the sidebar selects it and brings its time series into the chart. A selected well shows a gold ring around its marker, which is visible regardless of the underlying color.
 
-### Single Selection
+Multi-well selection uses Shift:
 
-Click a well on the map or in the sidebar. The well is highlighted and its time series appears in the chart.
+- **Shift-click** adds a well to (or removes it from) the current selection, so you can build up a list of wells to compare.
+- **Shift-drag** defines a rectangular selection; every well inside the box joins the current selection at once. The cursor switches to a crosshair during the drag so it's clear that the click is being used for selection rather than map panning.
 
-### Multi-Well Selection
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Map with shift-drag rectangle and gold-ringed selected wells</div>
 
-- **Shift + Click** — Hold <kbd>Shift</kbd> and click a well to add it to (or remove it from) the current selection.
-- **Shift + Drag** — Hold <kbd>Shift</kbd> and drag a rectangle on the map to select all wells within the box.
+When multiple wells are selected, the chart shows each as a separate line in a distinct color drawn from an eight-color palette. A legend identifies each well by name. Selections persist across data type changes — if you switch from water levels to nitrate, the same wells remain selected and the chart shows their nitrate history.
 
-<!-- screenshot: Map showing box-drag selection with crosshair cursor and gold-ringed selected wells -->
+## The Time Series Chart
 
-Selected wells display a **gold ring** around their marker. During box-drag selection, the cursor changes to a crosshair.
+The chart panel at the bottom of the screen plots the measurement history for whichever wells are currently selected. Each well appears as a smooth curve through its actual measurement points, with the curve drawn in the well's assigned color and the raw measurement points drawn on top as dots. The dots distinguish the actual recorded values from the interpolated curve between them.
 
-### Multi-Well Chart
+<div style="color: #c00; background: #ffeaea; padding: 0.5em 0.75em; border-left: 4px solid #c00; margin: 1em 0;"><strong>SCREENSHOT NEEDED:</strong> Time series chart with PCHIP curves and measurement dots</div>
 
-When multiple wells are selected, the time series chart shows each well as a separate color-coded line (from an 8-color palette). The legend identifies each well by name.
+### Curve shapes
 
-## Chart Panel Tabs
+By default, the curves use **PCHIP** (Piecewise Cubic Hermite Interpolating Polynomial) interpolation, which produces a smooth line that respects the monotonicity of the data and doesn't overshoot between points the way cubic splines often do. This is the right choice for most groundwater work — it gives a visually readable trend without inventing features that aren't in the data. A toggle switches to **linear** interpolation, which draws straight segments between consecutive measurements, useful when you want to see the raw point-to-point shape without any smoothing.
 
-The chart panel below the map uses a tabbed interface. The available tabs depend on context — tabs appear only when their data is available:
+### Ground surface elevation overlay
 
-| Tab | Available When | Shows |
-|-----|----------------|-------|
-| **Water Level** (or data type name) | Always | Time series for selected well(s) |
-| **Storage Change** | A raster is loaded | Cumulative storage volume curve |
-| **Raster Statistics** | A raster is loaded | Per-frame well-level statistics (mean, std dev, IQR, etc.) |
-| **Cross Section** | A cross-section line is drawn | Elevation profile along the line |
+For water-level data, a **Show GSE** toggle overlays each selected well's ground surface elevation as a brown dashed horizontal line. This is useful for reading the water table's depth relative to the surface rather than its absolute elevation — a water level 10 feet below the GSE reads clearly regardless of the absolute elevation number.
 
-The tab label for the first tab reflects the active data type — it reads "Water Level" for WTE data, or the data type name for other types (e.g., "Chloride", "pH").
+### Trend lines
 
-## Data Type Selector Sync
-
-When you load a raster or imputation model from the sidebar, the **data type selector** in the toolbar automatically switches to match that raster's or model's data type. For example, loading a chloride kriging raster switches the selector to "Chloride", updating the map markers and chart to show chloride data.
-
-## Time Series Chart
-
-The chart panel below the map shows measurement data for the selected well(s).
-
-<!-- screenshot: Time series chart with PCHIP curve and measurement dots -->
-
-### Interpolation
-
-By default, the chart draws a smooth **PCHIP** (Piecewise Cubic Hermite Interpolating Polynomial) curve through the measurement points. PCHIP preserves monotonicity — it produces a smooth line that does not overshoot between data points, unlike simple cubic spline interpolation. A total of 100 interpolated points are generated per well to create the smooth curve.
-
-You can switch to **Linear** interpolation, which draws straight lines between consecutive measurements.
-
-### Measurement Dots
-
-Actual measurement data points appear as dots on the curve. These are the real recorded values, while the line between them is interpolated. Each well's measurements appear with a distinct color matching its line.
-
-### Ground Surface Elevation (GSE)
-
-If the selected well has a ground surface elevation value, you can enable a **GSE overlay** — a brown dashed reference line showing the land surface level. This is useful for understanding how close the water table is to the surface.
-
-### Trend Lines
-
-When enabled, a linear regression trend line is computed for each selected well (requires at least 2 measurements within the window). The trend uses the most recent X years from the current date (default: 30 years), and the chart x-axis and trend line span the full window.
+A **Trend** toggle overlays a linear regression line on each well. The regression uses the most recent N years of data (default 30 years, configurable), and both the chart x-axis and the trend line span that full window regardless of whether the well has data across the whole window. Wells with fewer than two measurements in the window get skipped; the trend line requires at least two points to compute. This pairwise "every well gets its own trend" view complements the region-wide trend map covered on the [Trend Analysis](trend-analysis.md) page.
 
 ### Smoothing
 
-An optional kernel smoothing overlay applies a **Nadaraya-Watson** Gaussian kernel to the measurement data, with a configurable smoothing window in months. This helps visualize long-term trends by dampening short-term fluctuations.
+A **Smoothing** toggle applies a Nadaraya-Watson kernel regression with a Gaussian kernel and a user-configurable window in months. This dampens short-term fluctuations so a long-term seasonal or decadal pattern reads through more clearly. The smoothing line is drawn in a distinct style so it's never confused with the raw curve.
 
-### Zoom and Pan
+### Zoom and pan
 
-- **Drag to zoom** — Click and drag horizontally across the chart to zoom into a date range.
-- **Reset zoom** — Double-click the chart or use the reset button to return to the full date range.
-- The Y-axis auto-scales to fit the visible data.
+Horizontal drag across the chart zooms into a date range. Double-clicking or pressing the reset button returns the chart to the full date range. The y-axis auto-scales to fit whatever data is currently visible, so zooming in on a tight range fills the vertical space productively.
 
-### Measurement Editing
+### Editing and deleting measurements
 
-Click a measurement dot to select it. Right-click (or use the context menu) to:
+Clicking a measurement dot selects it, and a right-click (or the context menu on the dot) offers **Edit** or **Delete**. Edits update the value on the dot in place; deletions remove the measurement. Both operations write back to the underlying measurement file immediately, so there's no separate save step.
 
-- **Edit** — Change the measurement value.
-- **Delete** — Remove the measurement from the dataset.
+### Export
 
-Edits are saved directly to the corresponding `data_{code}.csv` file.
+The Export CSV button in the toolbar writes the currently displayed time series — including the interpolated curve points, not just the measurement dots — to a CSV that downloads through the browser. The file is named after the first selected well and the active data type, so `W123_wte.csv` and the like.
 
-### Export CSV
+### Expanded chart window
 
-Click the **Export CSV** button in the toolbar to download the currently displayed time series data (including interpolated points) as a CSV file.
+For detailed analysis where the chart's normal footprint is too small, the **Expand Chart** button in the toolbar opens the time series in a floating, resizable window that you can drag around and resize to fill the screen. The expanded window is a live view of the same data — selections, data type changes, and edits all propagate immediately. Closing the window with the X button or the Escape key returns the chart to its inline position.
 
-### Expanded Chart Window
+## Chart Panel Tabs
 
-Click the **Expand** button to open the time series chart in a floating, resizable window. This gives you a larger view for detailed analysis. The window can be dragged and resized. Click the X button or press <kbd>Escape</kbd> to close it.
+The chart panel uses a tabbed interface that surfaces different views of the currently loaded data. Tabs appear only when their underlying data exists, so the chart stays focused on what's relevant.
+
+The **time series** tab is always present and is the default. Its label reflects the active data type — it reads "Water Level" for WTE data, or the data type's name for other parameters ("Nitrate", "Chloride", "pH", and so on).
+
+The **Storage Change** tab appears when a spatial raster is loaded, and plots the cumulative volume change over time implied by the raster's animated surfaces. This is the primary output of the storage analysis workflow covered on the [Storage Analysis](spatial/storage.md) page.
+
+The **Raster Statistics** tab also appears when a spatial raster is loaded, and plots per-frame statistics — mean, median, standard deviation, interquartile range — computed across every pixel in each frame of the raster.
+
+The **Cross Section** tab appears when a cross-section line has been drawn on the map. It shows an elevation profile along the line, extracted from the currently loaded raster. Details are on the [Cross Section](spatial/cross-section.md) page.
