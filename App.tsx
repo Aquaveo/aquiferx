@@ -2,7 +2,8 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3, Maximize2, X } from 'lucide-react';
 import { Region, Aquifer, Well, Measurement, DataType, RasterAnalysisResult, RasterAnalysisMeta, CrossSectionProfile, ImputationModelResult, ImputationModelMeta } from './types';
-import { SidebarUserMenu } from '@aquaveo/geoglows-auth/react';
+import { UserMenu, SupabaseAuthUI, useAuth } from '@aquaveo/geoglows-auth/react';
+import { auth } from './auth';
 import { loadAllData } from './services/dataLoader';
 import { freshFetch } from './services/importUtils';
 import { slugify } from './utils/strings';
@@ -196,6 +197,22 @@ const ExpandedChartWindow: React.FC<{
 };
 
 const App: React.FC = () => {
+  const { user } = useAuth();
+  const [signInModalOpen, setSignInModalOpen] = useState(false);
+  const signInDialogRef = useRef<HTMLDialogElement>(null);
+
+  // Open/close the native <dialog> in response to React state. Using
+  // showModal() puts it in the browser's top layer (above all other
+  // content) and gives us free Escape-to-close behavior; the onClose
+  // listener below syncs the React state when the user dismisses via
+  // Escape or backdrop click.
+  useEffect(() => {
+    const dialog = signInDialogRef.current;
+    if (!dialog) return;
+    if (signInModalOpen && !dialog.open) dialog.showModal();
+    if (!signInModalOpen && dialog.open) dialog.close();
+  }, [signInModalOpen]);
+
   const [regions, setRegions] = useState<Region[]>([]);
   const [aquifers, setAquifers] = useState<Aquifer[]>([]);
   const [wells, setWells] = useState<Well[]>([]);
@@ -1285,7 +1302,16 @@ const App: React.FC = () => {
                 <span>Impute Gaps</span>
               </button>
             )}
-            <SidebarUserMenu variant='light' />   
+            {user ? (
+              <UserMenu />
+            ) : (
+              <button
+                onClick={() => setSignInModalOpen(true)}
+                className="flex items-center space-x-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors"
+              >
+                <span>Sign in</span>
+              </button>
+            )}
             <button
               onClick={() => setIsDataManagerOpen(true)}
               className="flex items-center space-x-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors"
@@ -1962,6 +1988,23 @@ const App: React.FC = () => {
           />
         </ExpandedChartWindow>
       )}
+
+      <dialog
+        ref={signInDialogRef}
+        onClick={(e) => {
+          // Native <dialog> doesn't close on backdrop click out of the box.
+          // The dialog element itself is the backdrop's hit target when
+          // padding-less; child clicks bubble to a different target.
+          if (e.target === signInDialogRef.current) setSignInModalOpen(false);
+        }}
+        onClose={() => setSignInModalOpen(false)}
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 m-0 w-[calc(100vw-2rem)] max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-0 backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm bg-white border border-slate-200 shadow-2xl"
+      >
+        <SupabaseAuthUI
+          adapter={auth}
+          onSuccess={() => setSignInModalOpen(false)}
+        />
+      </dialog>
     </div>
   );
 };
