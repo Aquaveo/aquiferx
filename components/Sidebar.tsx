@@ -2,7 +2,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Region, Aquifer, RasterAnalysisMeta, ImputationModelMeta } from '../types';
 import { MapPin, Droplets, MoreVertical, Pencil, Trash2, Download, Layers, Loader2, Info, Check, X as XIcon, ChevronRight, ChevronDown, Activity, Eye, EyeOff } from 'lucide-react';
-import { SidebarOrgBadge } from '@aquaveo/geoglows-auth/react';
 
 interface SidebarProps {
   regions: Region[];
@@ -1056,7 +1055,6 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-2">
-        <SidebarOrgBadge />
         <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm text-center">
           <p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Status</p>
           <div className="flex items-center justify-center space-x-2">
