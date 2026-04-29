@@ -28,6 +28,17 @@ removed APIs with their 0.3.1 equivalents, drop Cognito infra. Adopting
 the rich-profile editor (`<ProfileEditForm>`, etc.) and adding test infra
 are deliberately deferred (see Scope Boundaries).
 
+**Merge note (2026-04-29):** `origin/main` was merged into `implementing-auth`
+(merge commit `3270362`) to bring in 25+ commits of pre-existing aquiferx
+work (WQP integration, catalog system, doc rewrites, imputation/raster
+improvements). Five conflicts were resolved across `App.tsx`,
+`components/import/DataTypeEditor.tsx`, and `components/import/ImportDataHub.tsx`
+— the resolutions kept this plan's auth additions and took main's cleaner
+versions for the duplicated `delete-folder` fetch and the `fetchRegionList`
+signature. The merge auto-resolved one prior code-review finding (Finding #5
+of v1: `appUrl('/api/regions')` bypassing the Vercel rewrite) for that
+specific callsite by adopting main's raw `fetch('/api/regions')`.
+
 ## Problem Frame
 
 The library jump from `0.1.2` → `0.3.1` mixes one *forced* change and one
@@ -271,7 +282,7 @@ by the apps.geoglows precedent.
 
 ## Implementation Units
 
-- [ ] **Unit 1: Bump `@aquaveo/geoglows-auth` to `^0.3.1` and prune Cognito-only deps**
+- [x] **Unit 1: Bump `@aquaveo/geoglows-auth` to `^0.3.1` and prune Cognito-only deps**
 
 **Goal:** Move the manifest to the new lib version and remove
 no-longer-needed transitive deps so the build can fail loudly on the
@@ -313,7 +324,7 @@ removed APIs (which Units 2-5 then fix).
 
 ---
 
-- [ ] **Unit 2: Rewrite `auth.ts` to use the Supabase Auth adapter**
+- [x] **Unit 2: Rewrite `auth.ts` to use the Supabase Auth adapter**
 
 **Goal:** Replace the Cognito OIDC adapter with `createSupabaseAuthAdapter`
 so the rest of the app gets a working `AuthAdapter` and the typed
@@ -352,7 +363,7 @@ so the rest of the app gets a working `AuthAdapter` and the typed
 
 ---
 
-- [ ] **Unit 3: Replace `<SidebarUserMenu>` and add a sign-in modal trigger in `App.tsx`**
+- [x] **Unit 3: Replace `<SidebarUserMenu>` and add a sign-in modal trigger in `App.tsx`**
 
 **Goal:** Restore the navbar identity surface using the lib's 0.3.1 React
 exports — `<UserMenu>` for the signed-in case, a "Sign in" button +
@@ -407,7 +418,7 @@ exports — `<UserMenu>` for the signed-in case, a "Sign in" button +
 
 ---
 
-- [ ] **Unit 4: Remove `<SidebarOrgBadge>` from `Sidebar.tsx`**
+- [x] **Unit 4: Remove `<SidebarOrgBadge>` from `Sidebar.tsx`**
 
 **Goal:** Strip the org-badge import and render site so the sidebar
 compiles against 0.3.1.
@@ -440,7 +451,7 @@ compiles against 0.3.1.
 
 ---
 
-- [ ] **Unit 5: Drop Cognito environment variables**
+- [x] **Unit 5: Drop Cognito environment variables**
 
 **Goal:** Remove `VITE_COGNITO_*` env vars from local config and
 documentation; update the Vercel project (production + previews) in
@@ -483,7 +494,7 @@ the same window so deployed builds don't carry stale config.
 
 ---
 
-- [ ] **Unit 6: Verify `index.tsx` provider tree still compiles and re-bootstraps cleanly**
+- [x] **Unit 6: Verify `index.tsx` provider tree still compiles and re-bootstraps cleanly**
 
 **Goal:** Confirm the existing `<SupabaseProvider><AuthProvider>` wrapping
 in `index.tsx` works against 0.3.1 without modification, and decide on

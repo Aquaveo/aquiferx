@@ -205,12 +205,18 @@ const App: React.FC = () => {
   // showModal() puts it in the browser's top layer (above all other
   // content) and gives us free Escape-to-close behavior; the onClose
   // listener below syncs the React state when the user dismisses via
-  // Escape or backdrop click.
+  // Escape or backdrop click. The cleanup closes the dialog if the
+  // component unmounts while it's open (matters under StrictMode
+  // double-invoke and on hot reload) so we never leave an orphan
+  // top-layer modal behind.
   useEffect(() => {
     const dialog = signInDialogRef.current;
     if (!dialog) return;
     if (signInModalOpen && !dialog.open) dialog.showModal();
     if (!signInModalOpen && dialog.open) dialog.close();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
   }, [signInModalOpen]);
 
   const [regions, setRegions] = useState<Region[]>([]);
@@ -1367,7 +1373,6 @@ const App: React.FC = () => {
               <Database size={16} />
               <span>Manage Data</span>
             </button>
-               
           </div>
         </header>
 

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { X, Plus, Pencil, Trash2, Loader2, Info, BookOpen } from 'lucide-react';
 import { DataType, RegionMeta, ParameterCatalog } from '../../types';
 import { saveFiles, deleteFile } from '../../services/importUtils';
-import { appUrl } from '../../utils/paths';
 import { loadCatalog } from '../../services/catalog';
 import ConfirmDialog from './ConfirmDialog';
 import CatalogBrowser from '../CatalogBrowser';
@@ -63,7 +62,7 @@ const DataTypeEditor: React.FC<DataTypeEditorProps> = ({
   useEffect(() => {
     const fetchSuggestions = async () => {
       try {
-        const res = await fetch(appUrl('/api/regions'));
+        const res = await fetch('/api/regions');
         if (!res.ok) return;
         const allRegions: any[] = await res.json();
         const existing = new Set(types.map(t => t.code));
