@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3, Maximize2, X } from 'lucide-react';
 import { Region, Aquifer, Well, Measurement, DataType, RasterAnalysisResult, RasterAnalysisMeta, CrossSectionProfile, ImputationModelResult, ImputationModelMeta } from './types';
 import { UserMenu, SupabaseAuthUI, useAuth } from '@aquaveo/geoglows-auth/react';
-import { auth } from './auth';
+import { auth, supabase } from './auth';
 import { loadAllData } from './services/dataLoader';
 import { freshFetch } from './services/importUtils';
 import { slugify } from './utils/strings';
@@ -197,7 +197,7 @@ const ExpandedChartWindow: React.FC<{
 };
 
 const App: React.FC = () => {
-  const { user } = useAuth();
+  const { user, refresh } = useAuth();
   const [signInModalOpen, setSignInModalOpen] = useState(false);
   const signInDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -218,6 +218,21 @@ const App: React.FC = () => {
       if (dialog.open) dialog.close();
     };
   }, [signInModalOpen]);
+
+  // Mirror Supabase auth-state changes into React state. Without this,
+  // (a) magic-link and OAuth sign-ins leave the modal stuck open
+  //     because <SupabaseAuthUI>'s onSuccess only fires for password
+  //     sign-in, and
+  // (b) sign-out and token-refresh events from Supabase JS don't
+  //     update <AuthProvider>'s React state, so UserMenu can persist
+  //     for users who are no longer signed in.
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') setSignInModalOpen(false);
+      if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') refresh();
+    });
+    return () => data.subscription.unsubscribe();
+  }, [refresh]);
 
   const [regions, setRegions] = useState<Region[]>([]);
   const [aquifers, setAquifers] = useState<Aquifer[]>([]);
