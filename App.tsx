@@ -2,9 +2,12 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3, Maximize2, X } from 'lucide-react';
 import { Region, Aquifer, Well, Measurement, DataType, RasterAnalysisResult, RasterAnalysisMeta, CrossSectionProfile, ImputationModelResult, ImputationModelMeta } from './types';
+import { UserMenu, SupabaseAuthUI, useAuth } from '@aquaveo/geoglows-auth/react';
+import { auth, supabase } from './auth';
 import { loadAllData } from './services/dataLoader';
 import { freshFetch } from './services/importUtils';
 import { slugify } from './utils/strings';
+import { appUrl } from './utils/paths';
 import MapView, { MapViewHandle } from './components/MapView';
 import Sidebar from './components/Sidebar';
 import TimeSeriesChart from './components/TimeSeriesChart';
@@ -194,6 +197,42 @@ const ExpandedChartWindow: React.FC<{
 };
 
 const App: React.FC = () => {
+  const { user, refresh } = useAuth();
+  const [signInModalOpen, setSignInModalOpen] = useState(false);
+  const signInDialogRef = useRef<HTMLDialogElement>(null);
+
+  // Open/close the native <dialog> in response to React state. Using
+  // showModal() puts it in the browser's top layer (above all other
+  // content) and gives us free Escape-to-close behavior; the onClose
+  // listener below syncs the React state when the user dismisses via
+  // Escape or backdrop click. The cleanup closes the dialog if the
+  // component unmounts while it's open (matters under StrictMode
+  // double-invoke and on hot reload) so we never leave an orphan
+  // top-layer modal behind.
+  useEffect(() => {
+    const dialog = signInDialogRef.current;
+    if (!dialog) return;
+    if (signInModalOpen && !dialog.open) dialog.showModal();
+    if (!signInModalOpen && dialog.open) dialog.close();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, [signInModalOpen]);
+
+  // Mirror Supabase auth-state changes into React state. Without this,
+  // (a) magic-link and OAuth sign-ins leave the modal stuck open
+  //     because <SupabaseAuthUI>'s onSuccess only fires for password
+  //     sign-in, and
+  // (b) sign-out and token-refresh events from Supabase JS don't
+  //     update <AuthProvider>'s React state, so UserMenu can persist
+  //     for users who are no longer signed in.
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') setSignInModalOpen(false);
+      if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') refresh();
+    });
+    return () => data.subscription.unsubscribe();
+  }, [refresh]);
 
   const [regions, setRegions] = useState<Region[]>([]);
   const [aquifers, setAquifers] = useState<Aquifer[]>([]);
@@ -500,7 +539,7 @@ const App: React.FC = () => {
     loadingRasterRef.current = true;
     setLoadingRasterCode(meta.code);
     try {
-      const res = await fetch(`/data/${meta.filePath}`);
+      const res = await fetch(appUrl(`/data/${meta.filePath}`));
       if (res.ok) {
         const fullResult: RasterAnalysisResult = await res.json();
         // Select the aquifer if not already selected (use ref for current value)
@@ -550,7 +589,7 @@ const App: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(`/data/${meta.filePath}`);
+      const res = await fetch(appUrl(`/data/${meta.filePath}`));
       if (res.ok) {
         const fullResult: RasterAnalysisResult = await res.json();
         setCompareRasterResults(prev => [...prev, fullResult]);
@@ -569,7 +608,7 @@ const App: React.FC = () => {
     setRasterMeta(prev => prev.filter(m => !(m.code === meta.code && m.dataType === meta.dataType && m.regionId === meta.regionId)));
     // Delete the file on disk
     try {
-      await fetch('/api/delete-file', {
+      await fetch(appUrl('/api/delete-file'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filePath: meta.filePath }),
@@ -587,7 +626,7 @@ const App: React.FC = () => {
     const newPath = `${dir}/raster_${meta.dataType}_${newCode}.json`;
 
     try {
-      const res = await fetch('/api/rename-raster', {
+      const res = await fetch(appUrl('/api/rename-raster'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldPath, newPath, newCode, newTitle }),
@@ -622,7 +661,7 @@ const App: React.FC = () => {
   const handleLoadModel = async (meta: ImputationModelMeta) => {
     loadingModelRef.current = true;
     try {
-      const res = await fetch(`/data/${meta.filePath}`);
+      const res = await fetch(appUrl(`/data/${meta.filePath}`));
       if (res.ok) {
         const fullResult: ImputationModelResult = await res.json();
         if (!selectedAquiferRef.current || selectedAquiferRef.current.id !== meta.aquiferId) {
@@ -652,7 +691,7 @@ const App: React.FC = () => {
     }
     setModelMeta(prev => prev.filter(m => !(m.code === meta.code && m.regionId === meta.regionId)));
     try {
-      await fetch('/api/delete-file', {
+      await fetch(appUrl('/api/delete-file'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filePath: meta.filePath }),
@@ -669,7 +708,7 @@ const App: React.FC = () => {
     const newPath = `${dir}/model_wte_${newCode}.json`;
 
     try {
-      const res = await fetch('/api/rename-model', {
+      const res = await fetch(appUrl('/api/rename-model'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldPath, newPath, newCode, newTitle }),
@@ -861,7 +900,7 @@ const App: React.FC = () => {
       singleUnit: region.singleUnit,
       customDataTypes: region.customDataTypes,
     };
-    await fetch('/api/save-data', {
+    await fetch(appUrl('/api/save-data'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files: [{ path: `${regionId}/region.json`, content: JSON.stringify(regionMeta, null, 2) }] }),
@@ -953,7 +992,7 @@ const App: React.FC = () => {
       }))
     );
     const geojsonContent = JSON.stringify({ type: 'FeatureCollection', features }, null, 2);
-    await fetch('/api/save-data', {
+    await fetch(appUrl('/api/save-data'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files: [{ path: `${regionId}/aquifers.geojson`, content: geojsonContent }] }),
@@ -1010,7 +1049,7 @@ const App: React.FC = () => {
       dataFiles.push({ path: `${regionId}/data_${dt.code}.csv`, content: [header, ...rows].join('\n') });
     }
 
-    await fetch('/api/save-data', {
+    await fetch(appUrl('/api/save-data'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1115,7 +1154,7 @@ const App: React.FC = () => {
       `${m.wellId},"${m.wellName}",${m.date},${m.value},${m.aquiferId}`
     );
     const csvContent = [header, ...rows].join('\n');
-    await fetch('/api/save-data', {
+    await fetch(appUrl('/api/save-data'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files: [{ path: `${regionId}/data_${dtCode}.csv`, content: csvContent }] }),
@@ -1330,6 +1369,16 @@ const App: React.FC = () => {
               >
                 <Activity size={16} />
                 <span>Impute Gaps</span>
+              </button>
+            )}
+            {user ? (
+              <UserMenu />
+            ) : (
+              <button
+                onClick={() => setSignInModalOpen(true)}
+                className="flex items-center space-x-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors"
+              >
+                <span>Sign in</span>
               </button>
             )}
             <button
@@ -2007,6 +2056,23 @@ const App: React.FC = () => {
           />
         </ExpandedChartWindow>
       )}
+
+      <dialog
+        ref={signInDialogRef}
+        onClick={(e) => {
+          // Native <dialog> doesn't close on backdrop click out of the box.
+          // The dialog element itself is the backdrop's hit target when
+          // padding-less; child clicks bubble to a different target.
+          if (e.target === signInDialogRef.current) setSignInModalOpen(false);
+        }}
+        onClose={() => setSignInModalOpen(false)}
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 m-0 w-[calc(100vw-2rem)] max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-0 backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm bg-white border border-slate-200 shadow-2xl"
+      >
+        <SupabaseAuthUI
+          adapter={auth}
+          onSuccess={() => setSignInModalOpen(false)}
+        />
+      </dialog>
     </div>
   );
 };

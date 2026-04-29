@@ -1,6 +1,8 @@
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { SupabaseProvider, AuthProvider } from '@aquaveo/geoglows-auth/react';
+import { auth, supabase } from './auth';
 import App from './App';
 
 const rootElement = document.getElementById('root');
@@ -11,6 +13,10 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <SupabaseProvider client={supabase}>
+      <AuthProvider auth={auth}>
+        <App />
+      </AuthProvider>
+    </SupabaseProvider>
   </React.StrictMode>
 );

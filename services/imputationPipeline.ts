@@ -6,6 +6,7 @@ import { fetchGldasFeatures, GldasFeatures } from './gldasFetch';
 import { trainElm, predictElm } from './elm';
 import { interpolatePCHIP } from '../utils/interpolation';
 import { slugify } from '../utils/strings';
+import { appUrl } from '../utils/paths';
 
 export interface ImputationPipelineInput {
   title: string;
@@ -461,7 +462,7 @@ export async function runImputationPipeline(
   };
 
   // Save to disk
-  await fetch('/api/save-data', {
+  await fetch(appUrl('/api/save-data'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

@@ -1057,11 +1057,15 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside className="w-80 bg-white border-r border-slate-200 flex flex-col shadow-xl z-20">
-      <div className="p-6 border-b border-slate-100 flex items-center space-x-3 bg-gradient-to-br from-blue-600 to-indigo-700">
-        <Droplets className="text-white" size={28} />
-        <div>
-          <h1 className="text-lg font-bold text-white tracking-tight leading-none">Aquifer Analyst</h1>
-          <p className="text-blue-100 text-[10px] font-medium uppercase mt-1">Groundwater Intelligence</p>
+      <div className="p-4 border-b border-slate-100 bg-gradient-to-br from-blue-600 to-indigo-700">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <Droplets className="text-white" size={28} />
+            <div>
+              <h1 className="text-lg font-bold text-white tracking-tight leading-none">Aquifer Analyst</h1>
+              <p className="text-blue-100 text-[10px] font-medium uppercase mt-1">Groundwater Intelligence</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1077,7 +1081,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      <div className="p-4 bg-slate-50 border-t border-slate-100">
+      <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-2">
         <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm text-center">
           <p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Status</p>
           <div className="flex items-center justify-center space-x-2">

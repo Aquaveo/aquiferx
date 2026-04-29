@@ -8,6 +8,7 @@ import { isPointInGeoJSON } from '../utils/geo';
 import { interpolatePCHIP, interpolateLinear, kernelSmooth, smoothModelCombined } from '../utils/interpolation';
 import { krigGrid, estimateVariogramParams } from './kriging';
 import { idwGrid } from './idw';
+import { appUrl } from '../utils/paths';
 import { slugify } from '../utils/strings';
 
 export interface RasterPipelineInput {
@@ -104,7 +105,7 @@ export async function runRasterAnalysis(
     onProgress('Loading imputation model...', 5);
     await yieldToUI();
 
-    const modelResp = await fetch(`/data/${temporal.modelFilePath}`);
+    const modelResp = await fetch(appUrl(`/data/${temporal.modelFilePath}`));
     if (!modelResp.ok) throw new Error(`Failed to load model: ${temporal.modelFilePath}`);
     const modelResult: ImputationModelResult = await modelResp.json();
 
@@ -158,7 +159,7 @@ export async function runRasterAnalysis(
     onProgress('Loading imputation model...', 5);
     await yieldToUI();
 
-    const modelResp = await fetch(`/data/${temporal.modelFilePath}`);
+    const modelResp = await fetch(appUrl(`/data/${temporal.modelFilePath}`));
     if (!modelResp.ok) throw new Error(`Failed to load model: ${temporal.modelFilePath}`);
     const modelResult: ImputationModelResult = await modelResp.json();
 
@@ -456,7 +457,7 @@ export async function runRasterAnalysis(
 
   // Save to disk via API — per-aquifer subfolder with raster_ prefix
   const aquiferSlug = slugify(aquifer.name);
-  await fetch('/api/save-data', {
+  await fetch(appUrl('/api/save-data'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

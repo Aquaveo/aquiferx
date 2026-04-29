@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Trash2, Loader2 } from 'lucide-react';
 import { RegionMeta } from '../../types';
 import { freshFetch, saveFiles } from '../../services/importUtils';
+import { appUrl } from '../../utils/paths';
 import ConfirmDialog from './ConfirmDialog';
 
 interface RegionEditorProps {
@@ -58,7 +59,7 @@ const RegionEditor: React.FC<RegionEditorProps> = ({ regions, onSave, onClose })
     try {
       // Delete the region folder
       setDeleteProgress(30);
-      const res = await fetch('/api/delete-folder', {
+      const res = await fetch(appUrl('/api/delete-folder'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ folder: deleteTarget.id }),
