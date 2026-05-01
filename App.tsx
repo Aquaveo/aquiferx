@@ -287,6 +287,14 @@ const App: React.FC = () => {
       }
       if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') refresh();
       if (event === 'PASSWORD_RECOVERY') {
+        // Only open the recovery modal if THIS tab actually loaded with
+        // a recovery URL. Supabase fires PASSWORD_RECOVERY on every tab
+        // that revalidates a recovery-type session via getSession() —
+        // including tabs that did NOT receive the recovery email link
+        // (e.g., the user clicked the link in a different tab while
+        // aquiferx was already open). Without this gate, aquiferx's
+        // setNewPassword modal pops up cross-tab, which is misleading.
+        if (initialRecoveryUrlState.kind !== 'valid') return;
         setSignInView('setNewPassword');
         setSignInModalOpen(true);
         // Strip leftover recovery hash from history — Supabase has just
@@ -2195,6 +2203,14 @@ const App: React.FC = () => {
         {signInView === 'forgotPassword' && (
           <PasswordResetForm
             adapter={auth}
+            // Recovery email link should land back on aquiferx so the
+            // user finishes the password reset in the same surface they
+            // started in. Without an explicit redirectTo the adapter
+            // falls back to defaultRedirectTo (= window.location.origin),
+            // which is the same value but only takes effect when the
+            // origin is on Supabase Auth → URL Configuration → Redirect
+            // URLs. Pass it explicitly so intent is visible in code.
+            redirectTo={window.location.origin}
             onSuccess={() => setSignInView('resetEmailSent')}
             onCancel={() => setSignInView('signIn')}
           />
