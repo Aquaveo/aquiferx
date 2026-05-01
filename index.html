@@ -37,23 +37,18 @@
 <body class="bg-slate-50 text-slate-900">
   <div id="root"></div>
 <script>
-  // TEMP DIAGNOSTIC (delete after recovery-flow debugging is resolved):
-  // capture window.location synchronously, before the JS bundle has a
-  // chance to load and run. Persists to localStorage so we can read it
-  // after Supabase has consumed and cleaned the hash.
-  try {
-    var __initial = {
-      hash: window.location.hash,
-      search: window.location.search,
-      href: window.location.href,
-      ts: new Date().toISOString(),
-    };
-    window.__GEOGLOWS_INITIAL_URL__ = __initial;
-    window.localStorage.setItem(
-      'geoglows-recovery-debug',
-      JSON.stringify(__initial)
-    );
-  } catch (e) { /* noop */ }
+  // Capture window.location synchronously BEFORE the module bundle is
+  // fetched, so the password-recovery snapshot (recovery-url-snapshot.ts)
+  // can read the original hash even after Supabase JS has consumed and
+  // cleared it. Diagnostics on 2026-05-01 showed that in-module reads of
+  // window.location.hash race against Supabase's _initialize() — the
+  // bundler hoists/orders module evaluation in ways that don't match
+  // source-level import order. An inline <script> guarantees this runs
+  // before any JS module loads.
+  window.__GEOGLOWS_INITIAL_URL__ = {
+    hash: window.location.hash,
+    search: window.location.search,
+  };
 </script>
 <script type="module" src="./index.tsx"></script>
 </body>

@@ -2,31 +2,51 @@
 // module graph, BEFORE Supabase JS's `createClient` (in `./auth`) runs
 // `_initialize()` and consumes the hash.
 //
-// Imported by `index.tsx` BEFORE `./auth`, so the import-resolution order
-// guarantees this module's top-level code executes first. Once Supabase JS
-// has consumed `#access_token=…&type=recovery`, the hash is gone — relying
-// on `window.location.hash` from inside `App.tsx` (which imports `./auth`)
-// is too late.
+// IMPORTANT: even though this module is imported in `index.tsx` BEFORE
+// `./auth`, in practice Supabase JS's GoTrueClient kicks off
+// `_initialize()` from inside its constructor as a fire-and-forget
+// microtask, and synchronous top-level code in this file can still
+// observe an already-cleared `window.location.hash` (the bundler
+// hoists/orders things in ways that don't match the source-level
+// import order).
 //
-// Per plan 2026-04-30-003 — Unit 5 + B1 fix iteration after first smoke
-// showed the original module-load detector inside App.tsx ran AFTER
-// Supabase consumed the hash.
+// To make the read truly race-proof, the URL is captured by an inline
+// `<script>` tag in `index.html` that runs BEFORE the JS bundle is
+// fetched, and stashed onto `window.__GEOGLOWS_INITIAL_URL__`. We read
+// from there here, falling back to `window.location.*` only if the
+// inline snapshot is missing (e.g., during tests or in unexpected
+// loading environments).
+//
+// Per plan 2026-04-30-003 — Unit 5 + B1 fix iteration. Originally
+// added an in-module snapshot; promoted to an inline-script snapshot
+// after diagnostics confirmed the in-module read still raced.
 
 import { detectRecoveryUrlState, type RecoveryUrlState } from "@aquaveo/geoglows-auth/core";
 
-// Capture URL state BEFORE Supabase JS consumes the hash via
-// detectSessionInUrl. Crucially, do NOT strip the hash here — Supabase
-// needs to read it to establish the recovery session. The hash gets
-// cleaned by Supabase as part of consumption (and we re-strip leftover
-// fragments inside App.tsx's onAuthStateChange handler, mirroring the
-// pattern apps.geoglows uses for INITIAL_SESSION).
+interface InitialUrl {
+  hash: string;
+  search: string;
+}
+
+declare global {
+  interface Window {
+    __GEOGLOWS_INITIAL_URL__?: InitialUrl;
+  }
+}
+
+function readInitialUrl(): InitialUrl {
+  if (typeof window === "undefined") return { hash: "", search: "" };
+  const inline = window.__GEOGLOWS_INITIAL_URL__;
+  if (inline && typeof inline.hash === "string" && typeof inline.search === "string") {
+    return { hash: inline.hash, search: inline.search };
+  }
+  return { hash: window.location.hash, search: window.location.search };
+}
+
 export const initialRecoveryUrlState: RecoveryUrlState =
   typeof window === "undefined"
     ? { kind: "none" }
-    : detectRecoveryUrlState({
-        hash: window.location.hash,
-        search: window.location.search,
-      });
+    : detectRecoveryUrlState(readInitialUrl());
 
 if (initialRecoveryUrlState.kind === "pkce-unsupported") {
   console.error(
