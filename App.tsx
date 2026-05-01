@@ -253,10 +253,27 @@ const App: React.FC = () => {
   // top-layer modal behind.
   useEffect(() => {
     const dialog = signInDialogRef.current;
+    // eslint-disable-next-line no-console
+    console.log('[geoglows] dialog effect run', {
+      signInModalOpen,
+      dialogPresent: !!dialog,
+      dialogOpen: dialog?.open,
+    });
     if (!dialog) return;
-    if (signInModalOpen && !dialog.open) dialog.showModal();
+    if (signInModalOpen && !dialog.open) {
+      try {
+        dialog.showModal();
+        // eslint-disable-next-line no-console
+        console.log('[geoglows] dialog.showModal() called', { dialogOpen: dialog.open });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[geoglows] dialog.showModal() threw', err);
+      }
+    }
     if (!signInModalOpen && dialog.open) dialog.close();
     return () => {
+      // eslint-disable-next-line no-console
+      console.log('[geoglows] dialog effect cleanup', { dialogOpen: dialog.open });
       if (dialog.open) dialog.close();
     };
   }, [signInModalOpen]);
