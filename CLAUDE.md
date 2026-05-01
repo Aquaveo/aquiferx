@@ -45,3 +45,7 @@
 - `npm run dev` — start dev server on port 3000
 - `npx tsc --noEmit` — type check
 - `npx vite build` — production build
+
+## Environment
+- `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` — Supabase project URL + publishable key (shared with apps.geoglows / grace / rfs — same project + keys). Required for any environment that signs users in. Set per-environment on Vercel (Production + Preview + Development); setting only Production silently breaks Preview
+- `VITE_PORTAL_URL` — optional. GEOGloWS portal URL used for the Profile link target (`${VITE_PORTAL_URL}/#profile`) and the back-to-portal navbar link. Defaults to `https://portal-dev.geoglows.org`. Aquiferx is reached via direct Vercel URL (different origin from the portal proxy), so absolute URLs are required for cross-origin navigation; the env var lets preview branches override the target without a code change. See `.env.example`
