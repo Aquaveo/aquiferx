@@ -2,8 +2,25 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3, Maximize2, X } from 'lucide-react';
 import { Region, Aquifer, Well, Measurement, DataType, RasterAnalysisResult, RasterAnalysisMeta, CrossSectionProfile, ImputationModelResult, ImputationModelMeta } from './types';
-import { UserMenu, SupabaseAuthUI, useAuth } from '@aquaveo/geoglows-auth/react';
+import {
+  PasswordResetForm,
+  SetNewPasswordForm,
+  SupabaseAuthUI,
+  UserMenu,
+  useAuth,
+} from '@aquaveo/geoglows-auth/react';
 import { auth, supabase } from './auth';
+// initialRecoveryUrlState is captured at the EARLIEST point in the module
+// graph (before './auth' triggers Supabase JS's _initialize() which
+// consumes the hash). See ./recovery-url-snapshot.ts.
+import { initialRecoveryUrlState } from './recovery-url-snapshot';
+
+type SignInView =
+  | 'signIn'
+  | 'forgotPassword'
+  | 'resetEmailSent'
+  | 'setNewPassword'
+  | 'recoveryError';
 import { loadAllData } from './services/dataLoader';
 import { freshFetch } from './services/importUtils';
 import { slugify } from './utils/strings';
@@ -198,7 +215,25 @@ const ExpandedChartWindow: React.FC<{
 
 const App: React.FC = () => {
   const { user, refresh } = useAuth();
-  const [signInModalOpen, setSignInModalOpen] = useState(false);
+  // signInModalOpen — controls whether the dialog is shown.
+  // signInView — controls WHICH view is rendered inside the dialog.
+  // On every dialog close we reset signInView back to 'signIn' so the next
+  // open starts clean.
+  const [signInModalOpen, setSignInModalOpen] = useState(() => {
+    // Open the dialog at first render if the URL signaled a recovery state.
+    // initialRecoveryUrlState is captured at module-load (race-proof).
+    return initialRecoveryUrlState.kind !== 'none';
+  });
+  const [signInView, setSignInView] = useState<SignInView>(() => {
+    if (initialRecoveryUrlState.kind === 'valid') return 'setNewPassword';
+    if (initialRecoveryUrlState.kind === 'expired') return 'recoveryError';
+    if (initialRecoveryUrlState.kind === 'pkce-unsupported') return 'recoveryError';
+    return 'signIn';
+  });
+  // Tracks whether the user successfully completed setNewPassword. Used by
+  // the dialog's onClose handler to decide whether to clear the recovery
+  // session via signOutRedirect (G2).
+  const setNewPasswordCompletedRef = useRef(false);
   const signInDialogRef = useRef<HTMLDialogElement>(null);
 
   // Open/close the native <dialog> in response to React state. Using
@@ -226,13 +261,44 @@ const App: React.FC = () => {
   // (b) sign-out and token-refresh events from Supabase JS don't
   //     update <AuthProvider>'s React state, so UserMenu can persist
   //     for users who are no longer signed in.
+  //
+  // PASSWORD_RECOVERY — Supabase fires this when the user lands from a
+  // recovery email link. The module-load URL detector above already
+  // covers this case race-proof; this branch is redundant coverage for
+  // the rare case where Supabase fires the event late (per Supabase
+  // docs, replay behavior for late subscribers is not guaranteed).
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN') setSignInModalOpen(false);
+      if (event === 'SIGNED_IN') {
+        // Don't slam the dialog closed mid-recovery; the SIGNED_IN that
+        // fires after a successful updateUserPassword is handled by
+        // SetNewPasswordForm's onSuccess (which sets the completed ref
+        // and closes via setSignInModalOpen).
+        if (signInView !== 'setNewPassword') {
+          setSignInModalOpen(false);
+        }
+      }
       if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') refresh();
+      if (event === 'PASSWORD_RECOVERY') {
+        setSignInView('setNewPassword');
+        setSignInModalOpen(true);
+        // Strip leftover recovery hash from history — Supabase has just
+        // consumed `#access_token=…&type=recovery`, but the URL fragment
+        // may still be present. Mirrors the apps.geoglows pattern.
+        const hashHasAuth = /(?:^|[#&])access_token=/.test(
+          window.location.hash,
+        );
+        if (hashHasAuth) {
+          window.history.replaceState(
+            null,
+            document.title,
+            window.location.pathname + window.location.search,
+          );
+        }
+      }
     });
     return () => data.subscription.unsubscribe();
-  }, [refresh]);
+  }, [refresh, signInView]);
 
   const [regions, setRegions] = useState<Region[]>([]);
   const [aquifers, setAquifers] = useState<Aquifer[]>([]);
@@ -2065,13 +2131,112 @@ const App: React.FC = () => {
           // padding-less; child clicks bubble to a different target.
           if (e.target === signInDialogRef.current) setSignInModalOpen(false);
         }}
-        onClose={() => setSignInModalOpen(false)}
+        onClose={() => {
+          // G2 — if the user dismisses the setNewPassword view (Escape /
+          // backdrop / close button) WITHOUT successfully submitting,
+          // clear the recovery session so it doesn't linger in
+          // localStorage as an active session for the recovery user.
+          // Native <dialog> Escape and backdrop close both fire onClose.
+          if (
+            signInView === 'setNewPassword' &&
+            !setNewPasswordCompletedRef.current
+          ) {
+            void auth.signOutRedirect().catch((err: unknown) => {
+              console.error(
+                'Recovery signOutRedirect failed:',
+                err instanceof Error ? err.message : String(err),
+              );
+            });
+          }
+          setNewPasswordCompletedRef.current = false;
+          setSignInModalOpen(false);
+          setSignInView('signIn');
+        }}
         className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 m-0 w-[calc(100vw-2rem)] max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-0 backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm bg-white border border-slate-200 shadow-2xl"
       >
-        <SupabaseAuthUI
-          adapter={auth}
-          onSuccess={() => setSignInModalOpen(false)}
-        />
+        {signInView === 'signIn' && (
+          <SupabaseAuthUI
+            adapter={auth}
+            onSuccess={() => setSignInModalOpen(false)}
+            onForgotPasswordClick={() => setSignInView('forgotPassword')}
+          />
+        )}
+
+        {signInView === 'forgotPassword' && (
+          <PasswordResetForm
+            adapter={auth}
+            onSuccess={() => setSignInView('resetEmailSent')}
+            onCancel={() => setSignInView('signIn')}
+          />
+        )}
+
+        {signInView === 'resetEmailSent' && (
+          <div className="p-6 max-w-md mx-auto">
+            <h2 className="text-lg font-semibold mb-2">Check your email</h2>
+            <p className="text-sm text-slate-600 mb-4">
+              We sent a link to reset your password. Click the link in the
+              email to choose a new password.
+            </p>
+            <button
+              type="button"
+              className="px-4 py-2 rounded-md bg-slate-100 hover:bg-slate-200 text-sm font-medium text-slate-700"
+              onClick={() => setSignInView('signIn')}
+            >
+              Back to sign in
+            </button>
+          </div>
+        )}
+
+        {signInView === 'setNewPassword' && (
+          <SetNewPasswordForm
+            adapter={auth}
+            onSuccess={() => {
+              // Mark complete so onClose does NOT call signOutRedirect.
+              setNewPasswordCompletedRef.current = true;
+              setSignInModalOpen(false);
+            }}
+            onExpired={() => setSignInView('recoveryError')}
+            onCancel={() => {
+              // Explicit "Back to sign in" — clear the recovery session
+              // so it doesn't linger as a different user.
+              void auth.signOutRedirect().catch((err: unknown) => {
+                console.error(
+                  'Recovery signOutRedirect failed:',
+                  err instanceof Error ? err.message : String(err),
+                );
+              });
+              setSignInView('signIn');
+            }}
+          />
+        )}
+
+        {signInView === 'recoveryError' && (
+          <div className="p-6 max-w-md mx-auto">
+            <h2 className="text-lg font-semibold mb-2">
+              This recovery link expired
+            </h2>
+            <p className="text-sm text-slate-600 mb-4">
+              This recovery link has already been used or has expired. If
+              your email is from a corporate or government domain, your IT
+              system may have pre-fetched the link before you clicked it. You
+              can{' '}
+              <a
+                href="mailto:gromero@aquaveo.com"
+                className="text-blue-600 hover:underline"
+              >
+                contact support for manual recovery
+              </a>{' '}
+              or click below to request a new link.
+            </p>
+            <button
+              type="button"
+              className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium"
+              onClick={() => setSignInView('forgotPassword')}
+            >
+              Send a new link
+            </button>
+          </div>
+        )}
       </dialog>
     </div>
   );
