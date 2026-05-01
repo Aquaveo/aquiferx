@@ -49,3 +49,14 @@
 ## Environment
 - `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` — Supabase project URL + publishable key (shared with apps.geoglows / grace / rfs — same project + keys). Required for any environment that signs users in. Set per-environment on Vercel (Production + Preview + Development); setting only Production silently breaks Preview
 - `VITE_PORTAL_URL` — optional. GEOGloWS portal URL used for the Profile link target (`${VITE_PORTAL_URL}/#profile`) and the back-to-portal navbar link. Defaults to `https://portal-dev.geoglows.org`. Aquiferx is reached via direct Vercel URL (different origin from the portal proxy), so absolute URLs are required for cross-origin navigation; the env var lets preview branches override the target without a code change. See `.env.example`
+
+## Sign-in modal (1.5.0)
+
+- The lib's `<SupabaseAuthUI>` was rewritten in `@aquaveo/geoglows-auth@1.5.0` to match the vanilla portal modal: Google + GitHub OAuth, sign-up state machine (`signUp` + `signUpSent` views), CSS-class-driven visuals
+- `index.tsx` imports `@aquaveo/geoglows-auth/core/sign-in.css` once at module load. Without this import, the modal renders unstyled
+- `<SupabaseAuthUI>` props wired in `App.tsx`:
+  - `onClose={() => setSignInModalOpen(false)}` — aquiferx's outer `<dialog>` has no rendered close X today; this lets the lib render its own X. The lib does NOT call `dialog.close()` itself — the existing `<dialog>` close-event cleanup (G2 recovery-session clear) still fires via the useEffect that calls `dialog.close()` on state change
+  - `oauthRedirectTo={window.location.origin}` — OAuth lands back on aquiferx
+  - `emailRedirectTo={`${PORTAL_URL}/#profile`}` — sign-up confirmation lands on the portal where profile-completion lives
+- **Cross-tab sign-up flow (documented limitation):** user submits sign-up in aquiferx → `signUpSent` view. User confirms in email tab → lands on portal `#profile`. Cross-app SSO does NOT propagate from the portal tab back to the already-open aquiferx tab (different origins; localStorage is per-origin). User must close-and-reopen aquiferx, or click "Back to sign in" and re-authenticate. The `signUpSent` body copy sets this expectation: "Confirm in the portal, then return here to sign in."
+- **OAuth on Vercel preview branches is NOT supported:** Supabase redirect-URL allowlist contains only the production aquiferx origin (`https://aquiferx-bay.vercel.app`). Preview branches generate unique origins per-PR; OAuth clicks from previews fail with `redirect_uri_mismatch` (rendered as the generic OAuth error). Preview-branch testing of auth flows uses email/password + magic-link only. If preview-branch OAuth becomes a need, revisit with a wildcard allowlist or per-branch deploy-hook strategy

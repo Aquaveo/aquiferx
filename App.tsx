@@ -2176,6 +2176,19 @@ const App: React.FC = () => {
             adapter={auth}
             onSuccess={() => setSignInModalOpen(false)}
             onForgotPasswordClick={() => setSignInView('forgotPassword')}
+            // Aquiferx's outer <dialog> handles Escape + backdrop close, but
+            // has no rendered close X. Wiring onClose lets the lib render its
+            // .geoglows-signin-close X inside the modal content. Setting
+            // signInModalOpen=false → useEffect runs dialog.close() →
+            // <dialog>'s close event fires → existing G2 cleanup runs.
+            // Per lib contract, the lib does NOT call dialog.close() itself.
+            onClose={() => setSignInModalOpen(false)}
+            // OAuth lands back on aquiferx so the user remains in their sub-app.
+            oauthRedirectTo={window.location.origin}
+            // Sign-up email-confirmation lands on the portal, where profile
+            // completion lives — aquiferx has no profile UI. PORTAL_URL is the
+            // existing VITE_PORTAL_URL constant from plan 004.
+            emailRedirectTo={`${PORTAL_URL}/#profile`}
           />
         )}
 
