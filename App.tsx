@@ -2203,14 +2203,13 @@ const App: React.FC = () => {
         {signInView === 'forgotPassword' && (
           <PasswordResetForm
             adapter={auth}
-            // Recovery email link should land back on aquiferx so the
-            // user finishes the password reset in the same surface they
-            // started in. Without an explicit redirectTo the adapter
-            // falls back to defaultRedirectTo (= window.location.origin),
-            // which is the same value but only takes effect when the
-            // origin is on Supabase Auth → URL Configuration → Redirect
-            // URLs. Pass it explicitly so intent is visible in code.
-            redirectTo={window.location.origin}
+            // Preserve origin + pathname so the recovery email link returns
+            // the user to the same surface they started from. When aquiferx
+            // is reached via the portal proxy (https://portal-dev.geoglows.org/aquifer-analyst),
+            // window.location.origin alone is the portal root and the user
+            // would land outside the proxy path. Hash + search are stripped
+            // so we don't carry stale tokens/state into the email link.
+            redirectTo={window.location.origin + window.location.pathname}
             onSuccess={() => setSignInView('resetEmailSent')}
             onCancel={() => setSignInView('signIn')}
           />

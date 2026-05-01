@@ -25,19 +25,29 @@ export const supabase = createGeoglowsSupabaseClient({
   publishableKey: SUPABASE_KEY,
 });
 
-// defaultRedirectTo is consumed by the Supabase Auth adapter as the
-// fallback `emailRedirectTo` for magic-link flows (and other redirect
-// surfaces). Anchoring it to window.location.origin at module-load time
-// makes Vercel preview deploys, local dev, and production all redirect
-// magic-link users back to the host they signed in from — instead of
-// the project's Supabase Site URL, which is shared with apps.geoglows.
+// defaultRedirectTo is the fallback `redirectTo` for password-recovery,
+// magic-link, OAuth, and email-confirmation flows. It MUST preserve the
+// pathname so users accessed via the portal proxy
+// (e.g. https://portal-dev.geoglows.org/aquifer-analyst) return to the
+// same proxy path — using `window.location.origin` alone strips the
+// pathname, which would land users on the portal root instead of back
+// inside aquiferx.
 //
-// Operational requirement: every host that should be a valid redirect
-// target must also be in the Supabase project's Auth → URL Configuration
-// → Redirect URLs allowlist (production domain, Vercel preview pattern,
-// localhost for dev).
+// Hash and search are stripped to avoid replaying recovery tokens or
+// stale query state when the user clicks the recovery email link.
+//
+// Operational requirement: every host+path that should be a valid
+// redirect target must match a Supabase project's Auth → URL
+// Configuration → Redirect URLs allowlist entry (production domain,
+// Vercel preview pattern, localhost for dev). The existing
+// `https://portal-dev.geoglows.org/**` entry covers
+// `/aquifer-analyst`, `/grace-groundwater`, and `/hydroviewer`.
+function currentLocationWithoutHashOrSearch(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return window.location.origin + window.location.pathname;
+}
+
 export const auth = createSupabaseAuthAdapter({
   supabase,
-  defaultRedirectTo:
-    typeof window !== 'undefined' ? window.location.origin : undefined,
+  defaultRedirectTo: currentLocationWithoutHashOrSearch(),
 });
