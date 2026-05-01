@@ -48,6 +48,16 @@ export const initialRecoveryUrlState: RecoveryUrlState =
     ? { kind: "none" }
     : detectRecoveryUrlState(readInitialUrl());
 
+// TEMP DIAGNOSTIC: expose snapshot result for in-browser inspection.
+// Lets the user run `window.__GEOGLOWS_RECOVERY_STATE__` in the console
+// to verify what kind the detector resolved to. Remove once the
+// recovery-flow regression is closed.
+if (typeof window !== "undefined") {
+  (window as unknown as { __GEOGLOWS_RECOVERY_STATE__?: RecoveryUrlState }).__GEOGLOWS_RECOVERY_STATE__ = initialRecoveryUrlState;
+  // eslint-disable-next-line no-console
+  console.log("[geoglows] initialRecoveryUrlState:", initialRecoveryUrlState);
+}
+
 if (initialRecoveryUrlState.kind === "pkce-unsupported") {
   console.error(
     "PKCE recovery flow is not supported in @aquaveo/geoglows-auth 1.3.x. " +

@@ -276,6 +276,17 @@ const App: React.FC = () => {
   // docs, replay behavior for late subscribers is not guaranteed).
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event) => {
+      // TEMP DIAGNOSTIC: log every Supabase auth event with current
+      // signInView/signInModalOpen so we can see whether SIGNED_IN
+      // arrives before the recovery-state-driven setNewPassword view
+      // takes hold and silently closes the modal. Remove with
+      // recovery-url-snapshot's similar diagnostic.
+      // eslint-disable-next-line no-console
+      console.log('[geoglows] onAuthStateChange', {
+        event,
+        signInView,
+        recoveryKind: initialRecoveryUrlState.kind,
+      });
       if (event === 'SIGNED_IN') {
         // Don't slam the dialog closed mid-recovery; the SIGNED_IN that
         // fires after a successful updateUserPassword is handled by
