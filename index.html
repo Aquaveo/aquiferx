@@ -36,6 +36,25 @@
 </head>
 <body class="bg-slate-50 text-slate-900">
   <div id="root"></div>
+<script>
+  // TEMP DIAGNOSTIC (delete after recovery-flow debugging is resolved):
+  // capture window.location synchronously, before the JS bundle has a
+  // chance to load and run. Persists to localStorage so we can read it
+  // after Supabase has consumed and cleaned the hash.
+  try {
+    var __initial = {
+      hash: window.location.hash,
+      search: window.location.search,
+      href: window.location.href,
+      ts: new Date().toISOString(),
+    };
+    window.__GEOGLOWS_INITIAL_URL__ = __initial;
+    window.localStorage.setItem(
+      'geoglows-recovery-debug',
+      JSON.stringify(__initial)
+    );
+  } catch (e) { /* noop */ }
+</script>
 <script type="module" src="./index.tsx"></script>
 </body>
 </html>
