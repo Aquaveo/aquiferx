@@ -243,6 +243,13 @@ const App: React.FC = () => {
   const setNewPasswordCompletedRef = useRef(false);
   const signInDialogRef = useRef<HTMLDialogElement>(null);
 
+  // Declared up here (out of the data-loading state cluster below) because
+  // the dialog effect's deps need them — the dialog is rendered inside a
+  // tree gated by `isLoading` / `loadError` early-returns, so the effect
+  // must re-run when either flips.
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   // Open/close the native <dialog> in response to React state. Using
   // showModal() puts it in the browser's top layer (above all other
   // content) and gives us free Escape-to-close behavior; the onClose
@@ -251,32 +258,24 @@ const App: React.FC = () => {
   // component unmounts while it's open (matters under StrictMode
   // double-invoke and on hot reload) so we never leave an orphan
   // top-layer modal behind.
+  // The dialog is rendered inside a tree that's gated by `isLoading` and
+  // `loadError` early-returns above. On first mount, those return a loading
+  // / error screen, so `signInDialogRef.current` is null when this effect
+  // first runs — `dialog.showModal()` never gets called. Including
+  // `isLoading` and `loadError` in the deps re-runs the effect when the
+  // main JSX (which contains the dialog) finally mounts, at which point
+  // the ref is attached and the recovery modal opens correctly. Without
+  // these deps, opening a recovery email link silently signs the user in
+  // with no UI prompt to set a new password.
   useEffect(() => {
     const dialog = signInDialogRef.current;
-    // eslint-disable-next-line no-console
-    console.log('[geoglows] dialog effect run', {
-      signInModalOpen,
-      dialogPresent: !!dialog,
-      dialogOpen: dialog?.open,
-    });
     if (!dialog) return;
-    if (signInModalOpen && !dialog.open) {
-      try {
-        dialog.showModal();
-        // eslint-disable-next-line no-console
-        console.log('[geoglows] dialog.showModal() called', { dialogOpen: dialog.open });
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('[geoglows] dialog.showModal() threw', err);
-      }
-    }
+    if (signInModalOpen && !dialog.open) dialog.showModal();
     if (!signInModalOpen && dialog.open) dialog.close();
     return () => {
-      // eslint-disable-next-line no-console
-      console.log('[geoglows] dialog effect cleanup', { dialogOpen: dialog.open });
       if (dialog.open) dialog.close();
     };
-  }, [signInModalOpen]);
+  }, [signInModalOpen, isLoading, loadError]);
 
   // Mirror Supabase auth-state changes into React state. Without this,
   // (a) magic-link and OAuth sign-ins leave the modal stuck open
@@ -293,17 +292,6 @@ const App: React.FC = () => {
   // docs, replay behavior for late subscribers is not guaranteed).
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event) => {
-      // TEMP DIAGNOSTIC: log every Supabase auth event with current
-      // signInView/signInModalOpen so we can see whether SIGNED_IN
-      // arrives before the recovery-state-driven setNewPassword view
-      // takes hold and silently closes the modal. Remove with
-      // recovery-url-snapshot's similar diagnostic.
-      // eslint-disable-next-line no-console
-      console.log('[geoglows] onAuthStateChange', {
-        event,
-        signInView,
-        recoveryKind: initialRecoveryUrlState.kind,
-      });
       if (event === 'SIGNED_IN') {
         // Don't slam the dialog closed mid-recovery; the SIGNED_IN that
         // fires after a successful updateUserPassword is handled by
@@ -347,8 +335,6 @@ const App: React.FC = () => {
   const [aquifers, setAquifers] = useState<Aquifer[]>([]);
   const [wells, setWells] = useState<Well[]>([]);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
   const [selectedAquifer, setSelectedAquifer] = useState<Aquifer | null>(null);
