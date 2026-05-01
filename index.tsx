@@ -1,6 +1,11 @@
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+// MUST be imported BEFORE './auth'. The recovery-url snapshot captures
+// window.location.hash at module-load BEFORE Supabase JS's _initialize()
+// (triggered by './auth') consumes the access_token from the URL. Import
+// order is the load-bearing mechanism — do not reorder.
+import './recovery-url-snapshot';
 import { SupabaseProvider, AuthProvider } from '@aquaveo/geoglows-auth/react';
 import { auth, supabase } from './auth';
 import App from './App';

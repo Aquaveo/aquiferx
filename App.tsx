@@ -9,8 +9,11 @@ import {
   UserMenu,
   useAuth,
 } from '@aquaveo/geoglows-auth/react';
-import { detectRecoveryUrlState } from '@aquaveo/geoglows-auth/core';
 import { auth, supabase } from './auth';
+// initialRecoveryUrlState is captured at the EARLIEST point in the module
+// graph (before './auth' triggers Supabase JS's _initialize() which
+// consumes the hash). See ./recovery-url-snapshot.ts.
+import { initialRecoveryUrlState } from './recovery-url-snapshot';
 
 type SignInView =
   | 'signIn'
@@ -18,36 +21,6 @@ type SignInView =
   | 'resetEmailSent'
   | 'setNewPassword'
   | 'recoveryError';
-
-// Synchronous URL-state detection — runs at module-load time, BEFORE
-// Supabase JS's _initialize() consumes the hash. This is the race-proof
-// safety net for the PASSWORD_RECOVERY listener: if Supabase fires the
-// event before <App>'s useEffect attaches a listener, we still detect
-// the recovery URL here. Per plan 2026-04-30-003 (B1, G1).
-const initialRecoveryUrlState = (() => {
-  if (typeof window === 'undefined') return { kind: 'none' as const };
-  const state = detectRecoveryUrlState({
-    hash: window.location.hash,
-    search: window.location.search,
-  });
-  // G1: strip the recovery hash from history + Referer so the bearer
-  // token doesn't linger after Supabase consumes it.
-  if (state.kind !== 'none') {
-    window.history.replaceState(
-      null,
-      '',
-      window.location.pathname + window.location.search,
-    );
-  }
-  if (state.kind === 'pkce-unsupported') {
-    console.error(
-      'PKCE recovery flow is not supported in @aquaveo/geoglows-auth 1.3.x. ' +
-        'If your Supabase project has been migrated to PKCE, the recovery ' +
-        'URL template needs to use the implicit flow.',
-    );
-  }
-  return state;
-})();
 import { loadAllData } from './services/dataLoader';
 import { freshFetch } from './services/importUtils';
 import { slugify } from './utils/strings';
@@ -309,6 +282,19 @@ const App: React.FC = () => {
       if (event === 'PASSWORD_RECOVERY') {
         setSignInView('setNewPassword');
         setSignInModalOpen(true);
+        // Strip leftover recovery hash from history — Supabase has just
+        // consumed `#access_token=…&type=recovery`, but the URL fragment
+        // may still be present. Mirrors the apps.geoglows pattern.
+        const hashHasAuth = /(?:^|[#&])access_token=/.test(
+          window.location.hash,
+        );
+        if (hashHasAuth) {
+          window.history.replaceState(
+            null,
+            document.title,
+            window.location.pathname + window.location.search,
+          );
+        }
       }
     });
     return () => data.subscription.unsubscribe();
