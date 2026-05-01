@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3, Maximize2, X } from 'lucide-react';
+import { Layers, Map as MapIcon, Database, ChevronRight, Activity, Upload, Loader2, Download, Table, BarChart3, Maximize2, X, Droplet } from 'lucide-react';
 import { Region, Aquifer, Well, Measurement, DataType, RasterAnalysisResult, RasterAnalysisMeta, CrossSectionProfile, ImputationModelResult, ImputationModelMeta } from './types';
 import {
   PasswordResetForm,
@@ -14,6 +14,13 @@ import { auth, supabase } from './auth';
 // graph (before './auth' triggers Supabase JS's _initialize() which
 // consumes the hash). See ./recovery-url-snapshot.ts.
 import { initialRecoveryUrlState } from './recovery-url-snapshot';
+
+// Aquiferx is reached via direct Vercel URL (different origin from the portal)
+// so the Profile link and back-to-portal link must be absolute URLs. The env
+// var lets Vercel preview branches override the target without code changes.
+const PORTAL_URL =
+  (import.meta.env.VITE_PORTAL_URL as string | undefined) ??
+  'https://portal-dev.geoglows.org';
 
 type SignInView =
   | 'signIn'
@@ -1313,7 +1320,16 @@ const App: React.FC = () => {
       <main className="flex-1 flex flex-col relative overflow-hidden">
         {/* Top Navigation / Breadcrumbs */}
         <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-10">
-          <div className="flex items-center space-x-2 text-sm text-slate-600">
+          <div className="flex items-center space-x-3">
+            <a
+              href={PORTAL_URL}
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wider text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors"
+            >
+              <Droplet size={14} className="text-blue-600" />
+              <span className="hidden sm:inline">GEOGLOWS Portal</span>
+            </a>
+            <div className="h-5 w-px bg-slate-300" aria-hidden="true" />
+            <div className="flex items-center space-x-2 text-sm text-slate-600">
             <MapIcon size={16} />
             <button
               onClick={() => {
@@ -1364,6 +1380,7 @@ const App: React.FC = () => {
                 </span>
               </>
             )}
+            </div>
           </div>
           <div className="flex items-center space-x-3">
             {hasMultipleDataTypes && (
@@ -1438,7 +1455,7 @@ const App: React.FC = () => {
               </button>
             )}
             {user ? (
-              <UserMenu />
+              <UserMenu profileHref={`${PORTAL_URL}/#profile`} />
             ) : (
               <button
                 onClick={() => setSignInModalOpen(true)}
